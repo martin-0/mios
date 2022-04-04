@@ -1,0 +1,296 @@
+/*
+ * Order of business here:
+ *	- enable A20 gw
+ *	- enable protected mode
+ *	- make sure we can do bios call back to real mode ( using gdt )
+ *	- memory layout ?
+ *	- video driver ?
+ */
+
+.section .text
+	.code16
+
+_start:
+	jmp 1f
+	.= _start +3
+
+	/* We don't need BPB, we are not part of any partition (yet).	*/
+	/* I'll reserve the space, I may need to use it later.		*/
+
+	.asciz "MIOS"
+
+	.= _start + 0x3e			/* offset to bootcode after BPB */
+1:
+	movb %dl, (bootdrive)
+	leaw (msg), %si
+	call puts16
+
+	call detect_low_mem
+	test %ax, %ax
+	jz Lfatalerr
+
+	/* print the memory */
+	inc %ax
+	push %ax
+	leaw (msg_memlow), %si
+	call printf16
+
+	// call dump_regs
+
+	/* Attemp to enable the A20 gate */
+	call enable_A20
+	test %ax, %ax
+	jz prepm32
+
+	leaw (fatal_a20), %si
+	call printf16
+	jmp Lfatalerr
+
+
+prepm32:
+	leaw (ok_a20), %si
+	call printf16
+
+	/* prepare to jump to protected mode */
+	cli
+	lgdt (gdt_desc)
+
+	movl %cr0, %eax				/* enable protected mode */
+	orl $1, %eax
+	movl %eax, %cr0
+
+	ljmp $8, $(LINKADDR + pmode32)		/* flush instruction cache and set the proper cs selector */
+
+	.code32
+pmode32:	
+	movl $0x10, %eax
+	movw %ax, %ds
+	movw %ax, %es
+	movw %ax, %ss
+/*
+	// clrscr + set pos 0,0
+	movl $0xb8000, %edi
+	movl $1024, %ecx
+	//xor %eax, %eax
+	movl $0x07200720, %eax
+	rep stosl
+*/
+
+	cld
+	movl $0xB8f00, %edi
+	movl $0x7c00, %esi		// flat address
+	addl $(msg_hello_mi), %esi
+	movb $0x02, %ah
+dummy_print:
+	lodsb 
+	test %al, %al
+	jz dummy_print.1
+	stosw
+	jmp dummy_print
+	
+
+dummy_print.1:
+
+/*
+	movl $0x0249024d, (%esi)
+	movl $0x0249024d, 4(%esi)
+	movl $0x0249024d, 8(%esi)
+*/
+
+/*
+	xorl %eax, %eax
+	movb $0xf, %al
+	movw $0x3d4, %dx
+	outw %ax, %dx
+	movb $2, %al
+	movw $0x3d5, %dx
+	outb %al, %dx
+
+	movb $0xe, %al
+	movw $0x3d4, %dx
+	outw %ax, %dx
+	movb $0, %al
+	movw $0x3d5, %dx
+	outb %al, %dx
+*/
+
+	nop
+	ljmp $0x18, $(LINKADDR + pm2rm)
+	//ljmp $0x0, $(LINKADDR + pm2rm)		/* XXX: can't do this */
+pm2rm:
+
+	movl $0x20, %eax
+	movw %ax, %ds
+	movw %ax, %es
+	movw %ax, %ss
+	movw %ax, %fs
+	movw %ax, %bx
+
+	movl %cr0, %eax
+	dec %ax
+	//andl 0xfffffffe, %eax
+	movl %eax, %cr0
+	xorl %eax, %eax
+
+	
+	ljmp $0, $(rm1+LINKADDR)
+rm1:
+	.code16
+	nop
+	nop
+	movw $0x7c0, %ax
+	movw %ax, %es
+	movw %ax, %ds
+	movw %ax, %ss
+	movw %ax, %fs
+	movw $0xfffc, %sp
+
+rm16:
+	sti
+	leaw (msg_debug3), %si
+	call puts16
+
+	nop
+	call show_cur_ip
+
+	leaw (msg_debug4), %si
+	call puts16
+
+	movw $0x1000, %ax
+	int $0x16
+
+	leaw (msg_debug5), %si
+	call puts16
+
+keys:
+	movw $0x1000, %ax
+	int $0x16
+
+	xor %bx, %bx
+	movb $0x0e, %ah
+	int $0x10
+
+	cmpb $0x71, %al
+	je off
+	jmp keys
+
+	jmp off
+
+	/* NOTE:
+	 *	I check for A20, enable IDT and what then? Where will I do the memory check ?
+	 *	Can I just assume that 1MB+ is free for my use? Should I maybe stay somewhere lower ?
+	 *
+	 *	Next: create and test interface for BIOS calls. For that I need to rellocate myself
+	 *	somewhere above 1MB, so we are back to that memory testing .. maybe this should be done 
+	 *	before actual jump to protected mode ? Makes sense..
+	 */
+
+Lfatalerr:
+	leaw (fatal_error), %si
+	call puts16
+
+off:
+	leaw (msg_end), %si
+	call puts16
+	cli
+	hlt
+	jmp off
+
+show_cur_ip:
+	push %bp
+	movw %sp, %bp
+	pushw 2(%bp)
+	push %cs
+	leaw (msg_debug1), %si
+	call printf16	
+	addw $4, %sp
+	
+	pop %bp
+	ret
+
+.section .data
+
+	/* GDT table definiion */
+	.align 16
+	gdt_desc:	.word	end_gdt-gdt-1			/* size */
+			.word	LINKADDR + gdt,0		/* linear address, ptr to gdt */
+	.align 16
+	gdt:
+		/* base:	32b value, linear address where the segment begins
+		 * limit:	20b value, maximum addressable unit, either 1B units or 4k pages 
+		 * access:	description of segment: P | DPL  | S | E | DC | RW | A
+		 * flags:	granularity, db (size flag, 1B or 4k pages), long mode flag, reserved (0)
+		 */
+		.space	8		/* NULL desc */
+
+		/* %cs in kernel mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
+		.byte 0xcf		/* RTL: flags-limit 16-19: , flags: 32b protected mode segment, page granularity */
+		.byte 0			/* base 24-31 */
+
+		/* data in kernel mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
+		.byte 0xcf		/* RTL: flags-limit 16-19: , flags: 32b protected mode segment, page granularity */
+		.byte 0			/* base 24-31 */
+
+		/* %cs in real mode */	
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
+		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
+		.byte 0			/* base 24-31 */
+
+		/* data in real mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rx, accessed=0 */
+		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
+		.byte 0			/* base 24-31 */
+
+
+		/* XXX: TSS segment should be defined ; I need to think of memory layout though, base should be the designated mem, limit
+		 	is sizeof(tss), at least that's what i think
+		*/
+	end_gdt:
+
+	bios_ivt:
+		.word 0x3ff
+		.word 0,0
+
+	bootdrive:	.byte	0
+	lowmem:		.word	0
+
+	msg:	.asciz	"boot1\r\n"
+	debug:	.asciz	"DBEUG"
+	debug1:	.asciz	"debug1: %s\r\nhex tripplet: %x %x %x\r\npointer: %p\r\nunsigned val: %u\r\nsigned val: %d\r\nchars: %c %c %c\r\n"
+
+	msg_memlow:	.asciz	"low memory: %uKB\r\n"
+
+	fatal_error:	.asciz	"FATAL ERROR: system halted.\r\n"
+	fatal_a20:	.asciz	"Failed to activate A20 gate, aborting.\r\n"
+	ok_a20:		.asciz	"A20 gate enabled.\r\n"
+
+	.global str_val
+	str_val:	.asciz	"val: %x\r\n"
+
+	msg_hello_mi:	.asciz	"Hello from MIOS protected mode."
+
+
+	msg_kdb1:	.asciz	"keyboard status: %x\r\n"
+
+	msg_debug1:	.asciz	"current cs:ip: %x:%x\r\n"	
+	msg_debug2:	.asciz	"gdt size: 0x%x\r\n"
+	msg_debug3:	.asciz	"back to realmode\r\n"
+	msg_debug4:	.asciz	"press any key to continue...\r\n"
+	msg_debug5:	.asciz	"infinite loop...\r\n"
+
+	msg_end:	.asciz	"\r\nEND.\r\n"
+
