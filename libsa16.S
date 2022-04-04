@@ -362,8 +362,6 @@ A20e_fast:
  *	port 0x64 read:		read status register
  *	port 0x64 write:	send command to controller
  */
-
-// XXX: just copy-pasted this from boo1 .. i need to make sense out of this 
 .global A20e_kbd
 .func A20e_kbd
 A20e_kbd:
