@@ -4,7 +4,8 @@
  * Protective MBR on GPT disk. 
  *
  * Searching for freebsd-boot (83BD6B9D-7F41-11DC-BE0B-001560B84F0F) partition.
- * Once found first LBA of the partition is loaded into 07C0:0000 and system jumps there.
+ * Once found its contents is loaded to the 07c00:0000 buffer. Its size can't be more than nine 64kB segments.
+ * LBAs are treated as 32b numbers. Partition end has to fit within this range.
  *
  */
 
@@ -37,7 +38,7 @@
 _start:
 
 	/* 
-	 *	buffer:		0060:0000,	0x600 - 0x105FF		one 4k sector would fill up up to 0x1600
+	 *	buffer:		0060:0000,	0x600 - 0x105FF		one 4k sector would end up at 0x15ff
 	 *	realloc:	07A0:0000,	0x7a00 - 0x179FF
 	 *	code:		07C0:0000,      0x7c00 - 0x17C00
 	 *	Stack:		0000:5000,      0xffff - 0		grows downwards
@@ -51,7 +52,7 @@ _start:
 
 	xorw %si,%si
 	xorw %di,%di
-	movw %si, %ss
+	movw %si, %ss				/* read many times cli-sti is not needed for stack */
 	movw $STACK_OFFST, %sp
 	movw $0x100, %cx
 	cld
@@ -174,18 +175,19 @@ _start:
 
 .Lpartition_found:
 	/*
-	 * We don't really care if this code runs on 286 machine. Using 32b registers to be able
-	 * to read above the 16b LBA limit.
+	 * Using 32b registers to work with LBAs as 32b numbers. This way we can reach further
+	 * into the disk eventhough boot partition should be as close to start of the disk as possible. 
+	 *
 	 */
 
-	/* To avoid doing any mul/div instruction we can trade speed for size. Will read
-	 * by one LBA and increment the offset by the sector size. If there's overflow
-	 * in addition we know we need to move segment up.
-	 * We could control the max size we can load into the buffer which is:
-	 *
-	 *	0xa0000 - 0x7c00 = 0x98400 / 0x10000 = 9 when rounded down. 
+	/* To avoid doing any mul/div instructions we're trading speed for space. Disk is read LBA by LBA
+	 * and offset in buffer is incremented by the sector size. If there's overflow in addition we know
+	 * we need to move the segment up. It's expected that 0x10000 is divisible by the sector size.
 	 * 
-	 * We can't move segment up more than 9 times. 
+	 * Max buffer size:
+	 *	0xa0000 - 0x7c00 = 0x98400 / 0x10000 ~= 9 , rounding down.
+	 * 
+	 * That's the hard limit no matter the partition size.
 	 * 
 	 */  
 	
@@ -321,11 +323,10 @@ puts16:
 	err_gpt_hdr:	.asciz	"No GPT hdr"
 	err_noext:	.asciz	"BIOS err"
 	err_partial:	.asciz	"Partial "
-	//err_generic:	.asciz	"read error."
 	err_generic:	.asciz	"read error."
 	err_keyreboot:	.asciz	"\r\nHalted.\r\n"
 
-	/* MBR partitions definition starts here */
+	/* MBR partitions start here */
 	.= 0x1be
 
 	/* C/H/S start: 0/0/2, LBA 1 */
@@ -339,6 +340,6 @@ puts16:
 	.quad 0,0		/* partition 3 */
 	.quad 0,0		/* partition 4 */
 
-	/* magic in the end */
+	/* magic word */
 	.= 0x1fe
 	.word 0xaa55
