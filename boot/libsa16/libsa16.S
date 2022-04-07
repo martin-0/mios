@@ -1,15 +1,23 @@
 /* martin */
+/* cdecl:  scratch registers: ax cx dx */
 
-/* XXX: What ABI should I use? I should probably stick to a one and be consistent..  */
+// XXX: all arguments should be passed on stack then ..
 
 .section .text
 	.code16
 
-/* SI:	offset to DS where the string starts */
+/* -============================-
+ *				*
+ *	string functions	*
+ *				*
+ * -============================-
+
+/* DS:SI	zero terminated string to print */
 .global puts16
 .func puts16
 puts16:
-        pushw %bx
+	push %si
+	push %bx
         xorw %bx, %bx
 0:
         lodsb
@@ -20,21 +28,21 @@ puts16:
         int $0x10
         jmp 0b
 1:
-        popw %bx
+	pop %bx
+        pop %si
         ret
 .endfunc
 
-/*
- *	DS:SI	= string to print
- *		variable arguments are stored on stack
+/* DS:SI	zero terminated string to print
+ * stack	arguments to print, if any
  *
+ * restores all registers
  */
-/* bp is ss based, others are ds */
 .global printf16
 .func printf16
 printf16:
 	pusha				/* save them all */
-	movw %sp, %bp			/* local vars can be addressed using %bp */
+	movw %sp, %bp			/* local vars can be addressed using bp (ss segment) */
 	subw $2, %sp			/* reserve space for variable(s) */
 	leaw 0x12(%bp), %di		/* ss:di points to arguments ; 0x10(pusha), 0x02 (near call) */	
 	cld
@@ -69,25 +77,27 @@ printf16:
 	cmp $0x73, %al			/* %s */
 	jne .Lfmt_Xx			/* next fmt */
 
-	movw %ss:(%di), %si		/* %bp:%di points to current arg, %ds:%ax*/
+	movw %si, %cx			/* save si in cx */
+	movw %ss:(%di), %si		/* bp:di points to current arg, ds:ax*/
 	call puts16
+	movw %cx, %si			/* restore si */
 
 	addw $2, %di			/* advance counter */
 	jmp .Lbigloop
 	
 
 .Lfmt_Xx:
-	movb $0x27, -2(%bp)		/* i = 0x27, set for a-f */
+	movb $0x27, -2(%bp)		/* tmp = 0x27, set for a-f */
 	cmp $0x78, %al			/* %x */
 	je .Lfmt_Xx.1
 
 	cmp $0x58, %al			/* %X */
 	jne .Lfmt_p			/* next fmt */
 
-	subw $0x7, -2(%bp)		/* i -= 7, adjust for A-F */
+	subw $0x7, -2(%bp)		/* tmp -= 7, adjust for A-F */
 
 .Lfmt_Xx.1:
-	movw %ss:(%di), %dx		/* %dx = hex number to print */
+	movw %ss:(%di), %dx		/* dx = hex number to print */
 
 	xorw %bx, %bx			/* keep track of leading 0s */
 	movw $4, %cx			/* max digits in 16b nr */
@@ -113,7 +123,7 @@ printf16:
 .Lfmt_Xx.3:
 	cmp $0xa, %al			/* are we printing digit or a-f */
 	jb .Lfmt_Xx.4
-	addw -2(%bp), %ax		/* print char += i */
+	addw -2(%bp), %ax		/* print char += tmp */
 
 .Lfmt_Xx.4:
 	push %bx
@@ -132,7 +142,7 @@ printf16:
 	jne .Lfmt_u
 
 	movb $0x27, -2(%bp)		/* lower case hex nr */
-	movw %ss:(%di), %dx		/* %dx = hex number to print */
+	movw %ss:(%di), %dx		/* dx = hex number to print */
 
 	movw $4, %cx			/* max digits in 16b nr */
 	xorw %bx, %bx			/* keep track of leading 0s */
@@ -144,11 +154,11 @@ printf16:
 	jne .Lfmt_d
 
 .Lfmt_u.1:
-	movw %ss:(%di), %ax		/* %ax = hex number to print */
+	movw %ss:(%di), %ax		/* ax = hex number to print */
 	movw %ax, -2(%bp)		/* store in stack for later */
 
 .Lfmt_u.2:
-	movw $10000, %bx		/* we start dividing by 10000 */
+	movw $10000, %bx		/* we start dividing by 10000, max that can fit into 16b number */
 	xorw %cx, %cx			/* bool flag if we started printing already, to avoid leading 0s */
 
 .Lfmt_u.loop:
@@ -159,7 +169,7 @@ printf16:
 	testb %cl, %cl			/* did we print any char yet? */
 	jnz .Lfmt_u.loop.1
 
-	cmp $10, %bx			/* are we printing the last digit already */
+	cmp $1, %bx			/* are we printing the last digit already */
 	je .Lfmt_u.loop.1
 
 	testb %al, %al			/* if not, is this char also 0 */
@@ -186,7 +196,8 @@ printf16:
 	movw %bx, %ax
 	movw $10, %bx
 	div %bx
-	
+					/* XXX: I could probably stop one loop sooner as dx has the reminder */	
+					/* TODO: ?? */
 	test %ax, %ax			/* stop if it's 0 */
 	movw %ax, %bx
 	jnz .Lfmt_u.loop
@@ -238,15 +249,76 @@ detect_low_mem:
 	ret
 .endfunc
 
-/* 
-	===== A20 gate related functions  =====
+/* ES:DI string */
+.global strlen16
+.func strlen16
+strlen16:
+	push %di
 
+	xor %ax,%ax			/* scasb compares against al */
+	xor %cx,%cx			/* set the counter to 0xffff */
+	dec %cx
+	repne scasb			/* search for 0 in the es:di string */
+
+	inc %cx				/* we had to decrease cx by one */
+					/* cx got decremented once more when 0 byte was tested */
+	not %cx				/* we can compensate for that by doing 1's complement */
+	xchg %cx, %ax
+	pop %di
+	ret
+.endfunc
+
+/*
+ * DS:SI - s1
+ * ES:DI - s2
+ */
+.global strcmp16
+.func strcmp16
+strcmp16:
+	push %si
+	push %di
+	call strlen16			/* determine the size of the s2 string */
+	mov %ax, %cx			/* set the loop count ; acts as strncmp from now on */
+	xor %ax, %ax
+
+1:
+	repe cmpsb
+	test %cx, %cx			/* we finished looking through the string */
+	jz 2f
+	
+	dec %si				/* return si back */
+	dec %di
+
+2:
+	lodsb				/* load ds:si into al */
+	subb %es:(%di), %al		/* al is 0 if bytes are the same */
+	pop %di
+	pop %si
+	ret
+.endfunc
+
+.global strncmp16
+.func strncmp16
+strncmp16:
+	push %si
+	push %di
+
+	pop %di
+	pop %si
+	ret
+.endfunc
+
+/* -====================================-
+ * 					*
+ *	A20 gate related functions	*
+ *					*
+ * -====================================-
 */
 
 /* 
  * Check if A20 gate is enabled.
  *
- * Two memory locations: 0x600 and 0x100600 are written into but not restored.
+ * Two memory locations - 0x600 and 0x100600 - are written into but not restored.
  * It's assumed that during the check neither of the memory locations are used.
  *
  * return val in %ax: 0: A20 is enabled, 1: A20 is disabled
@@ -262,58 +334,45 @@ A20check16:
 	movw %sp, %bp
 
 	xorw %ax, %ax
-	movw %ax, %ds			/* set %ds to 0 */
+	movw %ax, %ds			/* set ds to 0 */
 	dec %ax
-	movw %ax, %es			/* set %es to 0xffff */
+	movw %ax, %es			/* set es to 0xffff */
 
 	movw $0x600, %si		/* ds:si points to 0000:600 -> 0x600 */
 	movw $0x610, %di		/* es:di points to ffff:610 -> 0x100600 */
 
 	movb %al, %ds:(%si)		/* 0000:600 = 0xff */
-	inc %ax				/* set %ax back to 0 */
+	inc %ax				/* set ax back to 0 */
 	movb %al, %es:(%di)		/* ffff:610 = 0 */
 
 	cmpb $0xff, %ds:(%si)
 	setne %al			/* if ds:si is the same A20 gate is enabled */
 
-	/* rollback stack afterwards */
-	pushw %ax
-	movw %es:(%di), %ax
-	andw $0xff, %ax
-	pushw %ax		// +2
-	pushw %di		// +2
-	pushw %es		// +2
+	/* print the debugging information if DEBUG_A20 is enabled */
+		pushw %ax
+		movw %es:(%di), %ax
+		andw $0xff, %ax
+		pushw %ax		// +2
+		pushw %di		// +2
+		pushw %es		// +2
 
-	movw %ds:(%si), %ax
-	andw $0xff, %ax
-	pushw %ax		// +2
-	pushw %si		// +2
-	pushw %ds		// +2
+		movw %ds:(%si), %ax
+		andw $0xff, %ax
+		pushw %ax		// +2
+		pushw %si		// +2
+		pushw %ds		// +2
 
-	/* XXX: this is for debug purposes only, normally it should be disabled */
-	movw -10(%bp), %ds		/* load the ds back to what is was saved */
-
-	leaw (dbg_a20_test), %si
-	call printf16
-	addw $12, %sp
-	pop %ax		// ret val
+		movw -10(%bp), %ds		/* load the ds back to what is was saved */
+		leaw (dbg_a20_test), %si
+		call printf16
+		addw $12, %sp
+		pop %ax		// ret val
 
 	pop %bp
 	pop %si
 	pop %di
 	pop %es
 	pop %ds
-	ret
-.endfunc
-
-/* DS:SI - s1
- * ES:DI - s2
- */
-.global strcmp16
-.func strcmp16
-strcmp16:
-	cld
-
 	ret
 .endfunc
 
@@ -385,7 +444,7 @@ A20e_kbd:
 .func wait_clear_8042
 wait_clear_8042:
 	xor %ax, %ax	
-	xor %bx, %bx			/* err count */
+	xor %dx, %dx			/* err count */
 	xor %cx, %cx
 	dec %cx				/* max loop counter */
 
@@ -395,8 +454,8 @@ wait_clear_8042:
 	
 	cmp $0xff, %al			/* no kbc ; expired by Linux */
 	jne .Lloop.1
-	inc %bx
-	cmpb $32, %bl
+	inc %dx
+	cmpb $32, %dl
 	jge .Lreterr
 	jmp .Lloop
 
@@ -471,7 +530,7 @@ dump_regs:
 	call 1f				/* +32 %ip */
 1:
 	movw %sp, %bp
-	/* reorder the registers according the printf arguments */
+	/* reorder the registers according to the printf arguments */
 	pushw 16(%bp)			/* di */
 	pushw 18(%bp)			/* si */
 	pushw 20(%bp)			/* bp */
@@ -485,13 +544,11 @@ dump_regs:
 	call printf16
 
 	addw $32, %sp			/* roll back the stack; we don't care about flags */
-	popa				/* restore orig registes */
+	popa				/* restore orig registers */
 	ret
 .endfunc
 
 .section .data
-	debug13:	.asciz	"register: %x\r\n"
-
 	dbg_a20_test:	.asciz	"%p:%p    0x%x\r\n%p:%p    0x%x\r\nax: 0x%x\r\n"
 
 	dbg_regs:	

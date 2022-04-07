@@ -2,16 +2,14 @@ CC=/local/cross/bin/i686-elf-gcc
 AS=/local/cross/bin/i686-elf-as
 LD=/local/cross/bin/i686-elf-ld
 
+DISK_RAW=disk00.raw
+
 INCDIR=include
 OBJDIR=obj
 
 LINKADDR=0x7c00
 
 ASFLAGS=--defsym LINKADDR=$(LINKADDR)
-LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T../tools/link.ld -N
-
-# XXX: original flags I used for m16
-# CFLAGS=-ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mregparm=3 -I${INCDIR}/ 
 
 # inspired by https://elixir.bootlin.com/linux/v4.20.17/source/arch/x86/Makefile
 REALMODE_CFLAGS:=-m16 -g -Os -Wall -Wstrict-prototypes -march=i386 -mregparm=3 \
@@ -19,32 +17,34 @@ REALMODE_CFLAGS:=-m16 -g -Os -Wall -Wstrict-prototypes -march=i386 -mregparm=3 \
 		-mno-mmx -mno-sse -ffreestanding -fno-stack-protector -mpreferred-stack-boundary=2
 REALMODE_CFLAGS+=-I$(INCDIR)
 
-SRCO= boot0.o boot1.o libsa16.o a20.o
+CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mregparm=3
+CFLAGS+=-I$(INCDIR)
+
 
 .PHONY: tools
-all: tools mios 
+all= tools mios
 
-mios:	${SRCO}
-	cd $(OBJDIR) && $(LD) $(LDFLAGS) -o mios.bin $(SRCO)
-	objcopy -v -O binary ${OBJDIR}/mios.bin mios
-	${OBJDIR}/fixboot mios
+mios:	pmbr tools
+	make -C boot
+	cd $(OBJDIR) && ./gptfix ../disk00.raw pmbr 
 
-a20.o:	a20.c
-	$(CC) $(REALMODE_CFLAGS) a20.c -c -o $(OBJDIR)/a20.o
+	dd if=obj/gboot of=./disk00.raw seek=1048576 bs=1 conv=notrunc
+# 512	dd if=obj/gboot of=./disk00.raw seek=17408 bs=1 conv=notrunc
 
-boot0.o: boot0.S
-	${AS} boot0.S -o ${OBJDIR}/boot0.o
-
-# boot1 requires LINKADDR as it loads gdt which requires linear address
-boot1.o: boot1.S
-	${AS} ${ASFLAGS} boot1.S -o ${OBJDIR}/boot1.o
-
-libsa16.o: libsa16.S
-	${AS} libsa16.S -o ${OBJDIR}/libsa16.o
+pmbr:
+	make -C boot/pmbr
 
 tools:
 	make -C tools
 
+disk:
+	rm -f $(DISK_RAW)
+	dd if=/dev/zero of=$(DISK_RAW) bs=1024k count=256
+	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:A501 -n 2:4096:266239 -t 2:8300 ./disk00.raw
+	#/sbin/sgdisk -a 1 -n 1:34:1057 -t 1:A501 -n 2:4096:266239 -t 2:8300 ./disk00.raw
+	
+
 clean:
-	rm -f ${OBJDIR}/* mios
 	make -C tools clean
+	make -C boot clean
+

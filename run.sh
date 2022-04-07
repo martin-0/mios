@@ -9,6 +9,10 @@ if [ "z"$1 = "zd" ]; then
 	DEBUG="-S"
 fi
 
-# qemu-system-i386 ${DEBUG} ${MONITOR} -curses -hda mios
-qemu-system-i386 -s ${DEBUG} ${MONITOR_STDIO} -curses -hda mios
+
+# raw
+# qemu-system-i386 -s ${DEBUG} ${MONITOR_STDIO} -curses -hda mios
+
+# GPT
+qemu-system-i386 -s ${DEBUG} ${MONITOR_STDIO} -curses -hda disk00.raw
 

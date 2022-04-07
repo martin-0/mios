@@ -7,15 +7,14 @@
  *	- video driver ?
  */
 
+.equ    BOOT_SEG,       0x7c0
+
 .section .text
 	.code16
+	.global _start
 
 _start:
 	jmp 1f
-	.= _start +3
-
-	/* We don't need BPB, we are not part of any partition (yet).	*/
-	/* I'll reserve the space, I may need to use it later.		*/
 
 	.asciz "MIOS"
 
@@ -47,8 +46,14 @@ _start:
 	jmp Lfatalerr
 
 
+
 prepm32:
 	leaw (ok_a20), %si
+	call printf16
+
+	push $(dummy_main+LINKADDR)
+	push %cs
+	leaw (dummy_str), %si
 	call printf16
 
 	/* prepare to jump to protected mode */
@@ -67,37 +72,34 @@ pmode32:
 	movw %ax, %ds
 	movw %ax, %es
 	movw %ax, %ss
-/*
-	// clrscr + set pos 0,0
-	movl $0xb8000, %edi
-	movl $1024, %ecx
-	//xor %eax, %eax
-	movl $0x07200720, %eax
-	rep stosl
-*/
+	movl $0x9FFFC, %esp
+
+	movl $(dummy_main), %eax
+	addl $0x7c00, %eax
+	call *%eax
 
 	cld
+.Lclrscr:
+	movl $0xB8000, %edi
+	movl $0x02000200, %eax
+	movl $1000, %ecx
+	rep stosl
+	
+
 	movl $0xB8f00, %edi
 	movl $0x7c00, %esi		// flat address
 	addl $(msg_hello_mi), %esi
 	movb $0x02, %ah
-dummy_print:
+.Ldummy_print:
 	lodsb 
 	test %al, %al
-	jz dummy_print.1
+	jz .Ldummy_print.1
 	stosw
-	jmp dummy_print
+	jmp .Ldummy_print
 	
 
-dummy_print.1:
+.Ldummy_print.1:
 
-/*
-	movl $0x0249024d, (%esi)
-	movl $0x0249024d, 4(%esi)
-	movl $0x0249024d, 8(%esi)
-*/
-
-/*
 	xorl %eax, %eax
 	movb $0xf, %al
 	movw $0x3d4, %dx
@@ -112,11 +114,9 @@ dummy_print.1:
 	movb $0, %al
 	movw $0x3d5, %dx
 	outb %al, %dx
-*/
 
 	nop
 	ljmp $0x18, $(LINKADDR + pm2rm)
-	//ljmp $0x0, $(LINKADDR + pm2rm)		/* XXX: can't do this */
 pm2rm:
 
 	movl $0x20, %eax
@@ -147,6 +147,7 @@ rm1:
 
 rm16:
 	sti
+
 	leaw (msg_debug3), %si
 	call puts16
 
@@ -279,7 +280,8 @@ show_cur_ip:
 	ok_a20:		.asciz	"A20 gate enabled.\r\n"
 
 	.global str_val
-	str_val:	.asciz	"val: %x\r\n"
+	str_val:	.asciz	"val: %d\r\n"
+	str2:		.asciz	"string %s, size: %u\r\n"
 
 	msg_hello_mi:	.asciz	"Hello from MIOS protected mode."
 
@@ -294,3 +296,11 @@ show_cur_ip:
 
 	msg_end:	.asciz	"\r\nEND.\r\n"
 
+	s1:	.asciz "AAAAAAAAAA123456789"
+	s2:	.asciz "AAAAAAAAAA1234567890"
+
+	sno:	.asciz	"different strings"
+	sok:	.asciz	"strings are the same"
+
+
+	dummy_str:	.asciz	"main: %p:%p\r\n"

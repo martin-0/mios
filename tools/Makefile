@@ -1,8 +1,10 @@
 
 OBJDIR=../obj
 
-fixboot: fixboot.c
-	cc -o ${OBJDIR}/fixboot fixboot.c
+ALL: gptfix
+
+gptfix: gptfix.c
+	cc -o $(OBJDIR)/gptfix gptfix.c
 
 clean:
-	rm -f ${OBJDIR}/fixboot
+	cd $(OBJDIR) && rm -f gptfix

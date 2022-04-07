@@ -15,8 +15,21 @@ SECTIONS
 		.boot0 { boot0.o(.text) }
 		.boot1 { boot1.o(.text) }
 	}
-	.text : { a20.o (.text) }
-	.data : { *(.data) }
+
+	.data16 : { boot*(.data) }
+	.libsa16 : { 
+		libsa16.o(.text) 
+		libsa16.o(.data) 
+	}
+
+	/* I can't load anyting here beyond 1MB because boot0 would have problems reaching it */
+	/* the only way to do this would be to have pm code in boot1 rellocate the blocks somewhere */
+	.text : { dummy.o(.*text*) }
+	.data : { dummy.o(.*data*) }
+	.rodata : { dummy.o(.*rodata*) }
+	.bss : { dummy.o(.*bss*) }
+	
+
 
     /* Discard common unwanted/unneeded sections */
     /DISCARD/ : {
