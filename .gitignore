@@ -1,4 +1,5 @@
 obj/*
+keep/
 *.swp
 mios
 disk00.raw

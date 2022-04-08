@@ -79,27 +79,22 @@ pmode32:
 	call *%eax
 
 	cld
-.Lclrscr:
-	movl $0xB8000, %edi
-	movl $0x02000200, %eax
-	movl $1000, %ecx
-	rep stosl
 	
 
 	movl $0xB8f00, %edi
-	movl $0x7c00, %esi		// flat address
+	movl $0x7c00, %esi		// XXX: we started here from 7c0 segment 
 	addl $(msg_hello_mi), %esi
 	movb $0x02, %ah
 .Ldummy_print:
 	lodsb 
 	test %al, %al
-	jz .Ldummy_print.1
+	jz .Ldummy_print_end
 	stosw
 	jmp .Ldummy_print
-	
 
-.Ldummy_print.1:
+.Ldummy_print_end:	
 
+	/* cursor update 
 	xorl %eax, %eax
 	movb $0xf, %al
 	movw $0x3d4, %dx
@@ -114,6 +109,7 @@ pmode32:
 	movb $0, %al
 	movw $0x3d5, %dx
 	outb %al, %dx
+	*/
 
 	nop
 	ljmp $0x18, $(LINKADDR + pm2rm)
@@ -134,6 +130,7 @@ pm2rm:
 
 	
 	ljmp $0, $(rm1+LINKADDR)
+	/* XXX: this is a way to go back to realmode .. i should stick to vm86 though */
 rm1:
 	.code16
 	nop
@@ -178,12 +175,8 @@ keys:
 	jmp off
 
 	/* NOTE:
-	 *	I check for A20, enable IDT and what then? Where will I do the memory check ?
-	 *	Can I just assume that 1MB+ is free for my use? Should I maybe stay somewhere lower ?
 	 *
-	 *	Next: create and test interface for BIOS calls. For that I need to rellocate myself
-	 *	somewhere above 1MB, so we are back to that memory testing .. maybe this should be done 
-	 *	before actual jump to protected mode ? Makes sense..
+	 *	Next: create and test interface for BIOS calls - the VM86 mode. 
 	 */
 
 Lfatalerr:
@@ -197,6 +190,7 @@ off:
 	hlt
 	jmp off
 
+/* temporary things i test */
 show_cur_ip:
 	push %bp
 	movw %sp, %bp

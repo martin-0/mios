@@ -10,28 +10,25 @@ ENTRY(_start);
 SECTIONS
 {
 
-	.boot1 : AT (LINKADDR) { 
+	#.boot1 : AT (LINKADDR) { 
+
+	. = 0x0;
+	.boot1 : { 
 		boot1.o(.text)
 		libsa16.o(.text)
 	}
 	.data16 : {
-		*(.data)
+		libsa16.o(.data)
+		libsa16.o(.rodata)
+		libsa16.o(.bss)
 	}
 
-/*
-	.libsa16 : { 
-		libsa16.o(.text) 
-		libsa16.o(.data) 
-	}
-*/
+	# I know though that physical addres is 0x7c00 + size of above boot1/data16. 
+	# How can I make this work without doing rellocation in the code ?
 
-	/* I can't load anyting here beyond 1MB because boot0 would have problems reaching it */
-	/* the only way to do this would be to have pm code in boot1 rellocate the blocks somewhere */
-	.text : { dummy.o(.*text*) }
-	.data : { dummy.o(.*data*) }
-	.rodata : { dummy.o(.*rodata*) }
-	.bss : { dummy.o(.*bss*) }
-	
+	. = 0x10000;
+	.text : { dummy.o(.text) }
+	.bss : { dummy.o(.bss) }
 
 
     /* Discard common unwanted/unneeded sections */

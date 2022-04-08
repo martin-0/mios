@@ -79,7 +79,8 @@ void setcursor() {
 }
 
 int dummy_main() { 
-	//puts("cool");
-	puts(dstr);
+	puts("cool");
+	//puts(dstr);
+	asm("hlt");
 	return 0;
 }
