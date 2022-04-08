@@ -15,7 +15,7 @@ OBJDIR=../obj
 LINKADDR=0x7c00
 
 ASFLAGS=--defsym LINKADDR=$(LINKADDR)
-LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N
+LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N -M
 
 # inspired by https://elixir.bootlin.com/linux/v4.20.17/source/arch/x86/Makefile
 REALMODE_CFLAGS:=-m16 -g -Os -Wall -Wstrict-prototypes -march=i386 -mregparm=3 \
