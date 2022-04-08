@@ -5,16 +5,19 @@ MONITOR_STDIO="-monitor stdio"
 
 MONITOR=""
 DEBUG=""
+QDISPLAY="-curses"
 
 # available options: 
 #	-m	monitor on stdio|telnet
 #	-d 	freeze CPU at start
+#	-x	disable curses
 #
 while [ $# -gt 0 ]; do
 	case "$1" in
 		 "-d")
 			DEBUG="-S"
 			;;
+
 		"-m")	shift
 			case $1 in
 				"s")	MONITOR="${MONITOR_STDIO}"
@@ -26,6 +29,9 @@ while [ $# -gt 0 ]; do
 					;;
 			esac
 			;;
+		"-x")	QDISPLAY=""
+			;;
+
 		*)
 			echo "unknown option $1"
 			exit 1
@@ -35,10 +41,10 @@ while [ $# -gt 0 ]; do
 
 done
 
-# use default
+# use defaults
 if [ "z${MONITOR}" = "z" ]; then
 	MONITOR="${MONITOR_STDIO}"
 fi
 
-qemu-system-i386 -s ${DEBUG} ${MONITOR} -curses -hda disk00.raw
+qemu-system-i386 -s ${DEBUG} ${MONITOR} ${QDISPLAY} -hda disk00.raw
 
