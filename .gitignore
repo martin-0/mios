@@ -1,5 +1,6 @@
 obj/*
 keep/*
+boot/boot0/*
 *.swp
 mios
 disk00.raw
