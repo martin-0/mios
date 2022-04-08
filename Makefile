@@ -26,10 +26,12 @@ all= tools mios
 
 mios:	pmbr tools
 	make -C boot
+
+	# install pmbr
 	cd $(OBJDIR) && ./gptfix ../disk00.raw pmbr 
 
+	# install gboot 
 	dd if=obj/gboot of=./disk00.raw seek=1048576 bs=1 conv=notrunc
-# 512	dd if=obj/gboot of=./disk00.raw seek=17408 bs=1 conv=notrunc
 
 pmbr:
 	make -C boot/pmbr
@@ -41,9 +43,7 @@ disk:
 	rm -f $(DISK_RAW)
 	dd if=/dev/zero of=$(DISK_RAW) bs=1024k count=256
 	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:A501 -n 2:4096:266239 -t 2:8300 ./disk00.raw
-	#/sbin/sgdisk -a 1 -n 1:34:1057 -t 1:A501 -n 2:4096:266239 -t 2:8300 ./disk00.raw
 	
-
 clean:
 	make -C tools clean
 	make -C boot clean
