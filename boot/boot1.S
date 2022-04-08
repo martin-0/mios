@@ -1,11 +1,4 @@
-/*
- * Order of business here:
- *	- enable A20 gw
- *	- enable protected mode
- *	- make sure we can do bios call back to real mode ( using gdt )
- *	- memory layout ?
- *	- video driver ?
- */
+/* martin */
 
 .equ    BOOT_SEG,       0x7c0
 
