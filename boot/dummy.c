@@ -6,8 +6,6 @@
 unsigned char* vga_text = (unsigned char*)VGA_SCREEN;
 uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;
 
-char* find_me = "################################DDDDDDDDDDDDDDDDDDDDDD###################";
-
 // current cursor position
 unsigned char cursx, cursy;
 unsigned char COLS = 80, ROWS = 25;
@@ -82,6 +80,6 @@ void setcursor() {
 
 int dummy_main() { 
 	puts("cool");
-	//puts(dstr);
+	puts(dstr);
 	return 0;
 }
