@@ -1,3 +1,6 @@
+/* martin */
+
+/*  LINKADDR is passed by the ld, set to 0x7c00 */
 OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
 OUTPUT_ARCH(i386)
 
@@ -10,6 +13,7 @@ SECTIONS
 		boot1.o(.text)
 		libsa16.o(.text)
 	}
+
 	.data16 : {
 		libsa16.o(.*data)
 	}
@@ -18,7 +22,6 @@ SECTIONS
 		__c32start = . ; 
 		dummy.o(.*)
 	}
-
 
     /* Discard common unwanted/unneeded sections */
     /DISCARD/ : {
