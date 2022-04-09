@@ -185,14 +185,15 @@ _start:
 	 * we need to move the segment up. It's expected that 0x10000 is divisible by the sector size.
 	 * 
 	 * Max buffer size:
-	 *	0xa0000 - 0x7c00 = 0x98400 / 0x10000 ~= 9 , rounding down.
+	 *	0x80000 - 0x7c00 = 0x78400/ 0x10000 ~= 8. We keep it to 7 full 64kB segments. That puts us
+	 * to 0x77C00. That's plenty for bootloader. 
 	 * 
 	 * That's the hard limit no matter the partition size.
 	 * 
 	 */  
 	
 	movw $BOOT_SEG, %ax
-	movw $9, %cx
+	movw $7, %cx
 
 	movl %es:0x20(%di), %ebx		/* bx = start LBA of the boot partition */		// L
 	movl %es:0x28(%di), %esi		/* si = end LBA of the boot partition */		// L
