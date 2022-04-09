@@ -330,8 +330,11 @@ A20check16:
 	push %es
 	push %di
 	push %si
-	push %bp
-	movw %sp, %bp
+
+	.ifdef DEBUG_A20		/* we need to reference stack vars */
+		push %bp		/* only if we need to print */
+		movw %sp, %bp
+	.endif
 
 	xorw %ax, %ax
 	movw %ax, %ds			/* set ds to 0 */
@@ -349,6 +352,7 @@ A20check16:
 	setne %al			/* if ds:si is the same A20 gate is enabled */
 
 	/* print the debugging information if DEBUG_A20 is enabled */
+	.ifdef DEBUG_A20
 		pushw %ax		// save return value
 		movw %es:(%di), %ax
 		andw $0xff, %ax
@@ -368,7 +372,9 @@ A20check16:
 		addw $12, %sp
 		pop %ax		// ret val
 
-	pop %bp
+		pop %bp
+	.endif
+
 	pop %si
 	pop %di
 	pop %es
