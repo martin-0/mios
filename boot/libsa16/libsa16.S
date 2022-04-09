@@ -348,11 +348,6 @@ A20check16:
 	cmpb $0xff, %ds:(%si)
 	setne %al			/* if ds:si is the same A20 gate is enabled */
 
-	nop
-	inc %ax
-	dec %ax
-	nop
-
 	/* print the debugging information if DEBUG_A20 is enabled */
 		pushw %ax		// save return value
 		movw %es:(%di), %ax
@@ -367,7 +362,7 @@ A20check16:
 		pushw %si		// +2
 		pushw %ds		// +2
 
-		movw -8(%bp), %ds		/* load the ds back to what is was saved */
+		movw 8(%bp), %ds	/* load the ds back to what is was saved */
 		leaw (dbg_a20_test), %si
 		call printf16
 		addw $12, %sp
