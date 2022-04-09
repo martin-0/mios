@@ -5,10 +5,18 @@ ENTRY(_start);
 SECTIONS
 {
 
-	.code16 : { boot1.o(.*) libsa16.o(.*) } 
+	. = LINKADDR; 
+	.boot1 : { 
+		boot1.o(.text)
+		libsa16.o(.text)
+	}
+	.data16 : {
+		libsa16.o(.*data)
+	}
 
-	.code32 SIZEOF(.code16) : AT( 0x7c00 ) { 
-		dummy.o(.*) 
+	.code32 : {
+		__c32start = . ; 
+		dummy.o(.*)
 	}
 
 
