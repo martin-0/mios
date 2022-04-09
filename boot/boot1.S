@@ -1,7 +1,5 @@
 /* martin */
 
-.equ    BOOT_SEG,       0x7c0
-
 .section .text
 	.code16
 	.global _start
@@ -13,11 +11,20 @@ _start:
 
 	.= _start + 0x3e			/* offset to bootcode after BPB */
 1:
+	/* setup the segment registers */
+	xorw %ax, %ax
+	movw %ax, %ds
+	movw %ax, %es
+	movw %ax, %fs
+	movw %ax, %gs
+
 	movb %dl, (bootdrive)
+
 	leaw (msg), %si
 	call puts16
 
 	call detect_low_mem
+
 	test %ax, %ax
 	jz Lfatalerr
 
@@ -30,6 +37,8 @@ _start:
 	// call dump_regs
 
 	/* Attemp to enable the A20 gate */
+	nop
+	nop
 	call enable_A20
 	test %ax, %ax
 	jz prepm32
@@ -44,10 +53,12 @@ prepm32:
 	leaw (ok_a20), %si
 	call printf16
 
-	push $(dummy_main+LINKADDR)
+	/*
+	pushl $(dummy_main)
 	push %cs
 	leaw (dummy_str), %si
 	call printf16
+	*/
 
 	/* prepare to jump to protected mode */
 	cli
@@ -57,7 +68,7 @@ prepm32:
 	orl $1, %eax
 	movl %eax, %cr0
 
-	ljmp $8, $(LINKADDR + pmode32)		/* flush instruction cache and set the proper cs selector */
+	ljmp $8, $(pmode32)			/* flush instruction cache and set the proper cs selector */
 
 	.code32
 pmode32:	
@@ -65,18 +76,17 @@ pmode32:
 	movw %ax, %ds
 	movw %ax, %es
 	movw %ax, %ss
-	movl $0x9FFFC, %esp
+	movl $0x7bfc, %esp			/* stack below the bootcode */
 
-	movl $(dummy_main), %eax
-	addl $0x7c00, %eax
-	call *%eax
-
+	//movl $(dummy_main), %eax
+	//addl $0x7c00, %eax
+	//call *%eax
+	call dummy_main
 	cld
 	
-
 	movl $0xB8f00, %edi
-	movl $0x7c00, %esi		// XXX: we started here from 7c0 segment 
-	addl $(msg_hello_mi), %esi
+	//movl $0x7c00, %esi		// XXX: we started here from 7c0 segment 
+	movl $(msg_hello_mi), %esi
 	movb $0x02, %ah
 .Ldummy_print:
 	lodsb 
@@ -105,7 +115,7 @@ pmode32:
 	*/
 
 	nop
-	ljmp $0x18, $(LINKADDR + pm2rm)
+	ljmp $0x18, $(pm2rm)
 pm2rm:
 
 	movl $0x20, %eax
@@ -122,18 +132,18 @@ pm2rm:
 	xorl %eax, %eax
 
 	
-	ljmp $0, $(rm1+LINKADDR)
+	ljmp $0, $(rm1)
 	/* XXX: this is a way to go back to realmode .. i should stick to vm86 though */
 rm1:
 	.code16
 	nop
 	nop
-	movw $0x7c0, %ax
+	xorw %ax, %ax
 	movw %ax, %es
 	movw %ax, %ds
 	movw %ax, %ss
 	movw %ax, %fs
-	movw $0xfffc, %sp
+	movw $0x7bfc, %sp
 
 rm16:
 	sti
@@ -201,7 +211,7 @@ show_cur_ip:
 	/* GDT table definiion */
 	.align 16
 	gdt_desc:	.word	end_gdt-gdt-1			/* size */
-			.word	LINKADDR + gdt,0		/* linear address, ptr to gdt */
+			.word	gdt,0				/* linear address, ptr to gdt */
 	.align 16
 	gdt:
 		/* base:	32b value, linear address where the segment begins
@@ -266,28 +276,14 @@ show_cur_ip:
 	fatal_a20:	.asciz	"Failed to activate A20 gate, aborting.\r\n"
 	ok_a20:		.asciz	"A20 gate enabled.\r\n"
 
-	.global str_val
-	str_val:	.asciz	"val: %d\r\n"
-	str2:		.asciz	"string %s, size: %u\r\n"
-
 	msg_hello_mi:	.asciz	"Hello from MIOS protected mode."
-
-
-	msg_kdb1:	.asciz	"keyboard status: %x\r\n"
 
 	msg_debug1:	.asciz	"current cs:ip: %x:%x\r\n"	
 	msg_debug2:	.asciz	"gdt size: 0x%x\r\n"
 	msg_debug3:	.asciz	"back to realmode\r\n"
-	msg_debug4:	.asciz	"press any key to continue...\r\n"
-	msg_debug5:	.asciz	"infinite loop...\r\n"
+	msg_debug4:	.asciz	"press any key to continue..\r\n"
+	msg_debug5:	.asciz	"infinite loop..\r\n"
 
 	msg_end:	.asciz	"\r\nEND.\r\n"
-
-	s1:	.asciz "AAAAAAAAAA123456789"
-	s2:	.asciz "AAAAAAAAAA1234567890"
-
-	sno:	.asciz	"different strings"
-	sok:	.asciz	"strings are the same"
-
 
 	dummy_str:	.asciz	"main: %p:%p\r\n"

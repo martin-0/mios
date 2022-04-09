@@ -83,7 +83,5 @@ void setcursor() {
 int dummy_main() { 
 	puts("cool");
 	//puts(dstr);
-	asm("hlt");
-	asm(".byte 0x41, 0x42, 0x43");
 	return 0;
 }
