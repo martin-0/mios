@@ -34,8 +34,6 @@ _start:
 	leaw (msg_memlow), %si
 	call printf16
 
-	// call dump_regs
-
 	/* Attemp to enable the A20 gate */
 	pushw $(printf)
 	leaw (msg_debug6), %si
@@ -73,11 +71,10 @@ pmode32:
 	movw %ax, %ss
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
-	call do_printf
+	call do_dump
 
 	cld
 	movl $0xB8f00, %edi
-	//movl $0x7c00, %esi		// XXX: we started here from 7c0 segment 
 	movl $(msg_hello_mi), %esi
 	movb $0x02, %ah
 .Ldummy_print:

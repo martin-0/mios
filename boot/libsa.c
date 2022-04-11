@@ -2,6 +2,9 @@
 
 // XXX: va_list and NULL should be defined in some header that makes sense not here in libsa
 
+// XXX: subdivide printf to smaller functions to handle printing ? make it will come useful later 
+//	if I decide to use *printf or similar .. but then, most likely not needed in libsa
+
 #ifndef NULL
 	#define	NULL	(void*)0
 #endif
@@ -10,6 +13,9 @@
 #include "asm.h"
 
 #define	MAX_HEXDIGITS_INT_32		8
+
+void do_dump(void);
+void dump_memory(uint32_t* addr, uint32_t size);
 
 uint32_t printf(char* fmt, ...) { 
 
@@ -60,12 +66,14 @@ uint32_t printf(char* fmt, ...) {
 						va_args++;
 						break;
 
-				case 'd':	;
-						nr = *(int32_t*)va_args;
-						uint32_t divisor = 1000000000;
+				case 'u':
+						nr = *(uint32_t*)va_args;
+						uint32_t divisor;
+
+				handle_unsigned_decimal:
+						divisor = 1000000000;
 
 						islz = 1;
-
 						while (divisor > 0) { 
 							i = nr / divisor;
 							nr -= (i*divisor);
@@ -80,6 +88,17 @@ uint32_t printf(char* fmt, ...) {
 
 						va_args++;
 						break;
+				case 'd':
+						nr = *(uint32_t*)va_args;
+						if (nr & 0x80000000) {
+							putc('-');
+							nr = ~nr +1;
+						}
+				
+						// XXX: very dirty .. creating subfunctions for printf would be better way to go;	
+						goto handle_unsigned_decimal;	
+						
+						break;
 				case 'c':
 						c = *(char*)va_args;
 						putc(c);
@@ -89,6 +108,9 @@ uint32_t printf(char* fmt, ...) {
 						puts(*va_args);
 						va_args++;
 						break;
+				case '%':	putc('%');
+						break;
+						
 				}
 				
 				break;
@@ -110,6 +132,31 @@ exit:
 	return 0;
 }
 
+void do_dump() {
+	dump_memory((uint32_t*)0x00080000, 0x200);
+}
+
+void dump_memory(uint32_t* addr, uint32_t size) {
+	uint32_t* cur_addr = addr;
+	uint32_t i, chunks;
+
+	// round up chunks
+	chunks = ( size + sizeof(uint32_t)-1 ) / sizeof(uint32_t);	
+
+	clrscr();
+	printf("addr: %p, size: %x, chunks: %d\n", addr, size, chunks);
+
+	printf("%p", cur_addr);
+	for(i =0; i < chunks; i++) {
+		printf("\t%p", *cur_addr++);
+		if ((i+1)%4 == 0) {
+			printf("\n%p", cur_addr);
+		}
+	}
+	putc('\n');
+}
+
 void do_printf(void) { 
-	printf("this is a string: %s, %s, %s\nhex numbers: 0x%x, 0x%X, %p\ndecimal number: %d\nchar: %c %c\n", "asd", "huh?", "meh", 0xcafe, 0xc0de, 0xdebeef, 1930, 'a', 'n');
+	printf("this is a string: %s, %s, %s\nhex numbers: 0x%x\t0x%X\t%p\ndecimal numbers: %d %u\nchar: %c %c\npercent: %%\n", 
+			"asd", "huh?", "meh", 0xcafe, 0xc0de, 0xdebeef, -42, -42, 'a', 'n');
 }

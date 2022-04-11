@@ -19,7 +19,10 @@ void clrscr();
 void setcursor();
 void puts(char* s);
 void cputc(char c, char attrib);
+uint8_t getc();
 
 #define putc(c)	cputc(c, DEFAULT_CHAR_ATTRIB)
+
+#define	TABSPACE	4
 
 #endif /* ifndef HAVE_CONS_H */

@@ -44,7 +44,6 @@ cursor_adjust:
 }
 
 void cputc(char c, char attrib) {
-	#define TABSPACE	8
 	/* handle special cases of character */
 	switch (c) { 
 			// XXX: does it make sense to cleanup the screen up to COLS ? probably yes .. 
@@ -55,7 +54,7 @@ void cputc(char c, char attrib) {
 			// XXX: well, tabs are more sophisticated than this, but for the time being ok
 	case '\t':	if (cursx + TABSPACE > COLS ) {
 				cursy++;
-				cursx = cursx + TABSPACE - COLS+1;
+				cursx = cursx + TABSPACE - COLS;
 			}
 			else {
 				cursx += TABSPACE;
@@ -96,4 +95,5 @@ void setcursor() {
 	outw(0xe, VGA_INDEX_REGISTER);
 	outb( (pos >> 8 ) & 0xff, VGA_DATA_REGISTER);
 }
+
 
