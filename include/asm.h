@@ -95,4 +95,16 @@ static inline uint16_t get_gs(void) {
 	return gs;
 }
 
+static inline uint32_t rorl(uint32_t v) {
+	uint32_t t;
+	asm volatile("movl %1, %%eax; roll $4, %%eax; movl %%eax, %0" : "=m"(t) : "r"(v));
+	return t;
+}
+
+static inline uint32_t rorr(uint32_t v) {
+	uint32_t t;
+	asm volatile("movl %1, %%eax; rorl $4, %%eax; movl %%eax, %0" : "=m"(t) : "r"(v));
+	return t;
+}
+
 #endif /* HAVE_ASM_H */
