@@ -20,7 +20,8 @@ SECTIONS
 
 	.code32 : {
 		__c32start = . ; 
-		dummy.o(.*)
+		cons.o(.*)
+		libsa.o(.*)
 	}
 
     /* Discard common unwanted/unneeded sections */

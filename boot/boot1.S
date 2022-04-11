@@ -37,8 +37,10 @@ _start:
 	// call dump_regs
 
 	/* Attemp to enable the A20 gate */
-	nop
-	nop
+	pushw $(printf)
+	leaw (msg_debug6), %si
+	call printf16
+
 	call enable_A20
 	test %ax, %ax
 	jz prepm32
@@ -52,13 +54,6 @@ _start:
 prepm32:
 	leaw (ok_a20), %si
 	call printf16
-
-	/*
-	pushl $(dummy_main)
-	push %cs
-	leaw (dummy_str), %si
-	call printf16
-	*/
 
 	/* prepare to jump to protected mode */
 	cli
@@ -78,12 +73,9 @@ pmode32:
 	movw %ax, %ss
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
-	//movl $(dummy_main), %eax
-	//addl $0x7c00, %eax
-	//call *%eax
-	call dummy_main
+	call do_printf
+
 	cld
-	
 	movl $0xB8f00, %edi
 	//movl $0x7c00, %esi		// XXX: we started here from 7c0 segment 
 	movl $(msg_hello_mi), %esi
@@ -287,3 +279,5 @@ show_cur_ip:
 	msg_end:	.asciz	"\r\nEND.\r\n"
 
 	dummy_str:	.asciz	"main: %p:%p\r\n"
+
+	msg_debug6:	.asciz	"val: %p\r\n"
