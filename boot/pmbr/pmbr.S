@@ -57,9 +57,7 @@ _start:
 	movw $0x100, %cx
 	cld
 	rep movsw
-
 	
-//	jmp $RELOC_SEG, $1f		/XXX: debug
 	jmp $0, $RELOC_SEG << 4 + 1f
 
 1:	
@@ -232,8 +230,6 @@ _start:
 	movw $0xaa55, %ax
 
 	jmp $0, $0x7c00
-	//jmp $BOOT_SEG, $0
-
 
 	/* Handle error codes */
 .Lerr_gpthdr:					/* invalid GPT header */
