@@ -15,6 +15,7 @@ SECTIONS
 	}
 
 	.data16 : {
+		boot1.o(.*data)
 		libsa16.o(.*data)
 	}
 
