@@ -11,6 +11,7 @@
  *	string functions	*
  *				*
  * -============================-
+*/
 
 /* DS:SI	zero terminated string to print */
 .global puts16
@@ -297,12 +298,45 @@ strcmp16:
 	ret
 .endfunc
 
+/* str and dst need to be within current ds/es segment */
+/* XXX: shouldn't we make it far ptr then ?
+ *
+* strncmp(char* src, char* dst, int len) */
 .global strncmp16
 .func strncmp16
 strncmp16:
 	push %si
 	push %di
+	push %bp
+	movw %sp, %bp
 
+	movw 12(%bp), %cx
+	movw 10(%bp), %di
+	movw 8(%bp), %si
+
+.Lcmp:
+	test %cx, %cx				/* are we done yet? */
+	jz .Lend
+
+	cmpsb					/* compare ds:si with es:di at most cx times */
+	jne .Lnotsame
+
+	dec %si
+	lodsb					/* test if one of the string is 0 already */
+	test %al, %al
+	jz .Lend
+	dec %cx					/* check next char */
+	jmp .Lcmp
+
+.Lnotsame:					/* cmpsb inc si/di, we need it for ret val */
+	dec %si
+	dec %di
+.Lend:
+	xor %ax, %ax
+	lodsb
+	sub %es:(%di), %al
+	
+	pop %bp
 	pop %di
 	pop %si
 	ret
@@ -520,6 +554,84 @@ enable_A20:
 	ret
 .endfunc
 
+/* -============================-
+ *				*
+ *	memory-probe functions	*
+ *				*
+ * -============================-
+*/
+
+/* to be executed in real-mode on i386 computer */
+/* getmem_e820( smap ) */
+.global getmem_E820
+.func getmem_E820
+getmem_E820:
+	pushl %esi
+	pushl %edi
+	pushl %ebx
+	pushl %ebp
+	movl %esp, %ebp
+	movw 12(%bp), %di
+
+	xorl %esi, %esi				/* entry count */
+
+.Lfirst_try:
+	leaw (smap_data), %di
+	xorl %ebx, %ebx
+	xorl %ecx, %ecx
+	movb $24, %cl				/* forcing 24b acpi 3 */
+	movl $0x534d4150, %edx			/* SMAP */
+	movl $0xe820, %eax			/* to make sure upper half of eax is 0 */
+	int $0x15
+	jc .Le820unsupported
+
+	movl $0x534d4150, %edx			/* some BIOSes trash this ? */
+	cmpl %edx, %eax
+	jnz .Le820unsupported
+
+	movzx %cl, %ecx	
+	movl %ecx, (smap+4)			/* save the entry size */
+
+.Lget_entries:
+	xorw %ax, %ax				/* prep for return code */
+	test %ebx, %ebx				/* already finished ? */
+	jz .LE820end
+
+	cmpb $20, %cl				/* do we have extended acpi attr? */
+	jbe .Lnoext
+
+	testb $1, %es:20(%di)			/* extended atrribute, bit0: 0 : skip */
+	jz .Lskip
+
+.Lnoext:
+	movl %es:8(%di), %eax
+	or %es:12(%di), %eax			/* check the len */
+	jz .Lskip
+
+	inc %esi				/* entries++ */
+	addw $24, %di
+
+.Lskip:
+	movb $24, %cl				/* forcing 24b acpi 3 */
+	movl $0x534d4150, %edx			/* SMAP */
+	movw $0xe820, %ax
+	int $0x15
+	jnc .Lget_entries
+
+.Le820unsupported:
+	shr $8, %ax
+	and $0xff, %ax
+
+.LE820end:
+	movl %esi, (smap)			/* save entries */
+	popl %ebp
+	popl %ebx
+	popl %edi
+	popl %esi
+	ret
+.endfunc
+
+
 .global dump_regs
 .func dump_regs
 dump_regs:
@@ -575,3 +687,17 @@ dump_regs:
 		.ascii	"es:        0x%x\r\n"
 		.ascii	"fs:        0x%x\r\n"
 		.asciz	"gs:        0x%x\r\n"
+
+	/* smap entry is:
+		.quad base, length
+		.long type, xattr (acpi 3)
+	*/
+	.align 8
+	.globl smap, smap_data
+	smap:
+		.long 0, 0				/* entries ; entry size */
+	smap_data:	
+		.lcomm data, 4096			/* actual data */
+
+
+
