@@ -14,13 +14,6 @@ SECTIONS
 		libsa16.o(.*)
 	}
 
-/*
-	.data16 : {
-		boot1.o(.*data)
-		libsa16.o(.*data)
-	}
-*/
-
 	.code32 : {
 		__c32start = . ; 
 		cons.o(.*)
