@@ -47,7 +47,7 @@ prepm32:
 	leaw (ok_a20), %si
 	call printf16
 
-	pushw $(smap)
+	pushw $(smap)				/* XXX: info only */
 	leaw (msg_smap), %si
 	call printf16
 
@@ -74,38 +74,6 @@ pmode32:
 	movw %ax, %ss
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
-/*
-	cld
-	movl $0xB8f00, %edi
-	movl $(msg_hello_mi), %esi
-	movb $0x02, %ah
-.Ldummy_print:
-	lodsb 
-	test %al, %al
-	jz .Ldummy_print_end
-	stosw
-	jmp .Ldummy_print
-
-.Ldummy_print_end:	
-*/
-
-	/* cursor update 
-	xorl %eax, %eax
-	movb $0xf, %al
-	movw $0x3d4, %dx
-	outw %ax, %dx
-	movb $2, %al
-	movw $0x3d5, %dx
-	outb %al, %dx
-
-	movb $0xe, %al
-	movw $0x3d4, %dx
-	outw %ax, %dx
-	movb $0, %al
-	movw $0x3d5, %dx
-	outb %al, %dx
-	*/
-
 	call parse_memmap
 
 	nop
@@ -127,7 +95,7 @@ pm2rm:
 
 	
 	ljmp $0, $(rm1)
-	/* XXX: this is a way to go back to realmode .. i should stick to vm86 though */
+	/* XXX: this is _a way to go back to realmode .. i should stick to vm86 though */
 rm1:
 	.code16
 	nop
