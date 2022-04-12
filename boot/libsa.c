@@ -1,21 +1,10 @@
 #include <stdint.h>
 
-// XXX: va_list and NULL should be defined in some header that makes sense not here in libsa
-
-// XXX: subdivide printf to smaller functions to handle printing ? make it will come useful later 
-//	if I decide to use *printf or similar .. but then, most likely not needed in libsa
-
-#ifndef NULL
-	#define	NULL	(void*)0
-#endif
-
+#include "libsa.h"
 #include "cons.h"
 #include "asm.h"
 
-#define	MAX_HEXDIGITS_INT_32		8
-
-void do_dump(void);
-void dump_memory(uint32_t* addr, uint32_t size);
+extern struct memory_map smap;
 
 uint32_t printf(char* fmt, ...) { 
 
@@ -132,10 +121,6 @@ exit:
 	return 0;
 }
 
-void do_dump() {
-	dump_memory((uint32_t*)0x00080000, 0x200);
-}
-
 void dump_memory(uint32_t* addr, uint32_t size) {
 	uint32_t* cur_addr = addr;
 	uint32_t i, chunks;
@@ -156,7 +141,23 @@ void dump_memory(uint32_t* addr, uint32_t size) {
 	putc('\n');
 }
 
-void do_printf(void) { 
-	printf("this is a string: %s, %s, %s\nhex numbers: 0x%x\t0x%X\t%p\ndecimal numbers: %d %u\nchar: %c %c\npercent: %%\n", 
-			"asd", "huh?", "meh", 0xcafe, 0xc0de, 0xdebeef, -42, -42, 'a', 'n');
+// XXX: not handling 64b integers 
+int parse_memmap() {
+	char* mem_type_desc[5] = {
+                "unknown",
+                "memory available to OS",
+                "reserved",
+                "ACPI reclaimable memory",
+                "ACPI NVS memory"
+        };
+
+	uint64_t i;
+//	clrscr();
+	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.entries, smap.entry_size);
+
+	for (i = 0; i < smap.entries; i++) {
+		printf("%p - %p		%s\n", (uint32_t)smap.data[i].base, (uint32_t)smap.data[i].base + (uint32_t)smap.data[i].len, mem_type_desc[smap.data[i].type]);
+	}
+
+	return 0;
 }
