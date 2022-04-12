@@ -4,7 +4,7 @@
  * Protective MBR on GPT disk. 
  *
  * Searching for freebsd-boot (83BD6B9D-7F41-11DC-BE0B-001560B84F0F) partition.
- * Once found its contents is loaded to the 07c00:0000 buffer. Its size can't be more than nine 64kB segments.
+ * Once found its contents is loaded to the 07c00:0000 buffer. Its size can't be more than seven 64kB segments.
  * LBAs are treated as 32b numbers. Partition end has to fit within this range.
  *
  */
