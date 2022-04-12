@@ -48,7 +48,7 @@ libsa16.o: libsa16/libsa16.S
 cons.o:	cons.c cons.h
 	$(CC) $(CFLAGS) cons.c -c -o $(OBJDIR)/cons.o
 
-libsa.o: libsa.c cons.o
+libsa.o: libsa.c libsa.h cons.o
 	$(CC) $(CFLAGS) libsa.c -c -o $(OBJDIR)/libsa.o
 
 pmbr:

@@ -152,12 +152,11 @@ int parse_memmap() {
         };
 
 	uint64_t i;
-//	clrscr();
+	clrscr();
 	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.entries, smap.entry_size);
 
 	for (i = 0; i < smap.entries; i++) {
 		printf("%p - %p		%s\n", (uint32_t)smap.data[i].base, (uint32_t)smap.data[i].base + (uint32_t)smap.data[i].len, mem_type_desc[smap.data[i].type]);
 	}
-
 	return 0;
 }

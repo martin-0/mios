@@ -2,6 +2,7 @@
 
 #include "asm.h"
 #include "cons.h"
+#include "libsa.h"
 
 unsigned char* vga_text = (unsigned char*)VGA_SCREEN;
 uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;
@@ -47,7 +48,8 @@ void cputc(char c, char attrib) {
 	/* handle special cases of character */
 	switch (c) { 
 			// XXX: does it make sense to cleanup the screen up to COLS ? probably yes .. 
-	case '\n':	cursy++;
+	case '\n':	clearto(cursy, cursx);
+			cursy++;
 			cursx =0;
 			goto exit;
 
@@ -73,14 +75,31 @@ exit:
 	setcursor();
 }
 
+void clearto(unsigned char newx, unsigned char newy) {
+	return;
+	uint16_t* lvga_text = (uint16_t*)VGA_SCREEN;
+	uint16_t curpos = (cursy*ROWS+cursx) << 1;
+	uint16_t newpos = (newy*ROWS+newx-1) << 1;
+	uint16_t pos, i;
+
+	if (newpos <= curpos)
+		return;
+	
+	for (pos = 0, i =0; pos < (newpos-curpos); i+=2, pos++)
+		*(lvga_text+curpos+i) = 0x0720;
+}
+
 void clrscr() { 
 	uint32_t* lvga_text = (uint32_t*)VGA_SCREEN;
 	uint16_t pos;
 	for (pos = 0; pos < 1000; pos++) { 
-		*(lvga_text + pos) = 0; 
+		*(lvga_text + pos) = 0x07200720;		// space with default attrib
 	}
 
 	cursx = cursy = 0;
+	uint32_t *ptr = (uint32_t*)0x450;	// XXX: updating for BIOS
+	*ptr = 0; ptr++; 
+	*ptr = 0;
 	setcursor();	
 }
 
@@ -94,6 +113,7 @@ void setcursor() {
 	// cursor high
 	outw(0xe, VGA_INDEX_REGISTER);
 	outb( (pos >> 8 ) & 0xff, VGA_DATA_REGISTER);
+
+	uint16_t* bios_cursor = (uint16_t*)0x450;
+	*bios_cursor = cursy << 8 | cursx;
 }
-
-

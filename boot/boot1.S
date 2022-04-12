@@ -19,10 +19,10 @@ _start:
 	movw %ax, %gs
 
 	movb %dl, (bootdrive)
-
 	leaw (msg), %si
 	call puts16
 
+	/* XXX: right now only detecting it to see if we have any EBDA memory region */
 	call detect_low_mem
 
 	test %ax, %ax
@@ -35,10 +35,6 @@ _start:
 	call printf16
 
 	/* Attemp to enable the A20 gate */
-	pushw $(printf)
-	leaw (msg_debug6), %si
-	call printf16
-
 	call enable_A20
 	test %ax, %ax
 	jz prepm32
@@ -47,11 +43,18 @@ _start:
 	call printf16
 	jmp Lfatalerr
 
-
-
 prepm32:
 	leaw (ok_a20), %si
 	call printf16
+
+	pushw $(smap)
+	leaw (msg_smap), %si
+	call printf16
+
+	pushw $(smap)
+	call getmem_E820
+	test %ax, %ax
+	jnz Lfatalerr
 
 	/* prepare to jump to protected mode */
 	cli
@@ -71,8 +74,7 @@ pmode32:
 	movw %ax, %ss
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
-	call do_dump
-
+/*
 	cld
 	movl $0xB8f00, %edi
 	movl $(msg_hello_mi), %esi
@@ -85,6 +87,7 @@ pmode32:
 	jmp .Ldummy_print
 
 .Ldummy_print_end:	
+*/
 
 	/* cursor update 
 	xorl %eax, %eax
@@ -102,6 +105,8 @@ pmode32:
 	movw $0x3d5, %dx
 	outb %al, %dx
 	*/
+
+	call parse_memmap
 
 	nop
 	ljmp $0x18, $(pm2rm)
@@ -276,5 +281,4 @@ show_cur_ip:
 	msg_end:	.asciz	"\r\nEND.\r\n"
 
 	dummy_str:	.asciz	"main: %p:%p\r\n"
-
-	msg_debug6:	.asciz	"val: %p\r\n"
+	msg_smap:	.asciz	"smap addr: 0x%p\r\n"

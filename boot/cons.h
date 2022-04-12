@@ -16,6 +16,8 @@
 #define	DEFAULT_CHAR_ATTRIB	WHITE_ON_BLACK
 
 void clrscr();
+void clearto(unsigned char newx, unsigned char newy);
+
 void setcursor();
 void puts(char* s);
 void cputc(char c, char attrib);
