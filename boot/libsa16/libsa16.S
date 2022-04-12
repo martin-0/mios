@@ -667,8 +667,6 @@ dump_regs:
 .endfunc
 
 .section .data
-	dbg_a20_test:	.asciz	"%p:%p    0x%x\r\n%p:%p    0x%x\r\nax: 0x%x\r\n"
-
 	dbg_regs:	
 		.ascii	"Register dump:\r\n"
 		.ascii	"ax:        0x%x\r\n"
@@ -700,4 +698,7 @@ dump_regs:
 		.lcomm data, 4096			/* actual data */
 
 
+	.ifdef DEBUG_A20
+		dbg_a20_test:	.asciz	"%p:%p    0x%x\r\n%p:%p    0x%x\r\nax: 0x%x\r\n"
+	.endif
 
