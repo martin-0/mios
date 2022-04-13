@@ -631,6 +631,12 @@ getmem_E820:
 	ret
 .endfunc
 
+/* -============================-
+ *				*
+ *	debug functions		*
+ *				*
+ * -============================-
+*/
 
 .global dump_regs
 .func dump_regs
