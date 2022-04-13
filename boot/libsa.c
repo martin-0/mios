@@ -1,80 +1,85 @@
+/* martin */
+
 #include <stdint.h>
 
 #include "libsa.h"
 #include "cons.h"
-#include "asm.h"
 
 extern struct memory_map smap;
 
 uint32_t printf(char* fmt, ...) { 
 
-	// XXX: pointer arithmetic is not allowed on void* ptrs. defaulting to char* then
-	char** va_args = (&fmt)+1;
+	char** va_args = (&fmt)+1;					// XXX: pointer arithmetic is not allowed on void* ptrs. defaulting to char* then
 	char* pchar = fmt;
 	
-	int32_t i,nr;
-	char c,islz;
+	int32_t nr;
+	long_t lnr;
+	char c, islz;
 
 	while (*pchar != '\0') {
 		switch(*pchar) {
 		// FMT specifier
-		case '%': 	if (*(++pchar) == '\0') goto exit;
-			
+		case '%': 	if (*(pchar+1) == '\0') {		// just print % if this is the last char
+					putc('%');
+					break;
+				}
+		
 				// go through known formats	
-				switch(*pchar) {
+				switch(*(++pchar)) {
+				case 'l':
+						// if second argument is not l just continue with the print
+						if (*(++pchar) != 'l') {
+							putc(*pchar);
+							break;
+						}
+
+						switch(*(++pchar)) {
+						case 'x':
+						case 'X':
+								islz = 0;		// always print leading 0s with 64b
+								c = (*pchar & 0x20) ? 0x57 : 0x37;
+
+								lnr = *(long_t*)va_args;
+								helper_printf_x(lnr.high,islz,c);
+								helper_printf_x(lnr.low,islz,c);
+
+								va_args++; va_args++;		// sizeof ptr* is 4, we pushed 8B on stack
+								break;
+						case 'u':	
+								// XXX: waaaait a minute ... 
+								// XXX: what was I thinking ? it doesn't work this way!
+								// XXX: this will be a bit more complicated .. 
+								lnr = *(long_t*)va_args;
+								helper_printf_u(lnr.high,0);
+								helper_printf_u(lnr.low,0);
+
+								va_args++; va_args++;		// sizeof ptr* is 4, we pushed 8B on stack
+								break;
+						default:
+								putc(*pchar);
+						}
+						break;
 				case 'p':
 				case 'X':
 				case 'x':	
-						nr = *(int32_t*)va_args;
+						nr = *(uint32_t*)va_args;
+						islz = 1;				// don't print leading 0s by default
 
 						// always print leading zeros with %p
 						if (*pchar == 'p') {
 							islz = 0;
 							puts("0x");
 						}
-						else {
-							islz = 1;		/* leading 0s, don't print */
-						}
-					
-						for (i = 0; i < MAX_HEXDIGITS_INT_32; i++) {
-							nr = rorl(nr);
-							c = nr & 0xf;
 
-							if (islz) {
-								if(c == 0) continue;
-								else
-									islz = 0;
-							}
-							if (c < 10) c += 0x30;
-							else {
-								// handle lower/upper case
-								c+= (*pchar & 0x20) ? 0x57 : 0x37;
-							}
-							putc(c);
-						}
+						c = (*pchar & 0x20) ? 0x57 : 0x37;
+
+						helper_printf_x(nr,islz,c);
 						va_args++;
 						break;
 
 				case 'u':
 						nr = *(uint32_t*)va_args;
-						uint32_t divisor;
-
-				handle_unsigned_decimal:
-						divisor = 1000000000;
-
-						islz = 1;
-						while (divisor > 0) { 
-							i = nr / divisor;
-							nr -= (i*divisor);
-							divisor /= 10;
-							if (islz) { 
-								if (i == 0) continue;
-								else
-									islz = 0;
-							}
-							putc(i+0x30);
-						}
-
+						helper_printf_u(nr, 1);
 						va_args++;
 						break;
 				case 'd':
@@ -83,11 +88,10 @@ uint32_t printf(char* fmt, ...) {
 							putc('-');
 							nr = ~nr +1;
 						}
-				
-						// XXX: very dirty .. creating subfunctions for printf would be better way to go;	
-						goto handle_unsigned_decimal;	
-						
+						helper_printf_u(nr, 1);
+						va_args++;
 						break;
+
 				case 'c':
 						c = *(char*)va_args;
 						putc(c);
@@ -97,17 +101,13 @@ uint32_t printf(char* fmt, ...) {
 						puts(*va_args);
 						va_args++;
 						break;
+
 				case '%':	putc('%');
 						break;
 						
 				}
 				
-				break;
-
-		// escaping characte
-		case '\\':	if (*(++pchar) == '\0') goto exit;
-				putc(*pchar);
-				break;
+				break; // case %
 
 		default:
 				putc(*pchar);
@@ -116,9 +116,44 @@ uint32_t printf(char* fmt, ...) {
 		pchar++;
 	}
 
-exit:
-
 	return 0;
+}
+
+void helper_printf_u(uint32_t nr, char lz) {
+	uint32_t i,divisor = DIVISOR_INT_32;
+
+	while (divisor > 0) { 
+		i = nr / divisor;
+		nr -= (i*divisor);
+		divisor /= 10;
+		if (lz) { 
+			// maybe a bit confusing but we dividied divisor by 10 already as a prep for next loop
+			if ( (divisor > 0) && ( i == 0) ) continue;
+			else
+				lz = 0;
+		}
+		putc(i+0x30);
+	}
+}
+
+void helper_printf_x(uint32_t nr, char lz, char ofst) {
+	uint16_t i;
+	char c;
+
+	for (i = 0; i < MAX_HEXDIGITS_INT_32 ; i++) {
+		ROL(nr);
+		c = nr & 0xf;
+
+		if (lz) {
+			if(i != (MAX_HEXDIGITS_INT_32-1) && c == 0) continue;
+			else lz = 0;
+		}
+		if (c < 10) c += 0x30;
+		else {
+			c+= ofst;
+		}
+		putc(c);
+	}
 }
 
 void dump_memory(uint32_t* addr, uint32_t size) {
@@ -141,7 +176,6 @@ void dump_memory(uint32_t* addr, uint32_t size) {
 	putc('\n');
 }
 
-// XXX: not handling 64b integers 
 int parse_memmap() {
 	char* mem_type_desc[5] = {
                 "unknown",
@@ -150,13 +184,19 @@ int parse_memmap() {
                 "ACPI reclaimable memory",
                 "ACPI NVS memory"
         };
+	
+	printf("this is a test: %s\nhex: %x, %llx\ndecimal: %d, %u\nmisc:  %llm and %\nmisc2: \\ \\$ \\*", 
+		"meh", 0xcafec0de, 0xfffffffbeeef, -42, -43);
+
+	asm ("hlt");
 
 	uint64_t i;
 	clrscr();
+
 	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.entries, smap.entry_size);
 
 	for (i = 0; i < smap.entries; i++) {
-		printf("%p - %p		%s\n", (uint32_t)smap.data[i].base, (uint32_t)smap.data[i].base + (uint32_t)smap.data[i].len, mem_type_desc[smap.data[i].type]);
+		printf("%llx - %llx\t%s\n", smap.data[i].base, (smap.data[i].base + smap.data[i].len), mem_type_desc[smap.data[i].type]);
 	}
 	return 0;
 }
