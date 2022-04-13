@@ -6,6 +6,7 @@ MONITOR_STDIO="-monitor stdio"
 MONITOR=""
 DEBUG=""
 QDISPLAY="-curses"
+EXTRAPARAM=""
 
 # available options: 
 #	-m	monitor on stdio|telnet
@@ -32,6 +33,10 @@ while [ $# -gt 0 ]; do
 		"-x")	QDISPLAY=""
 			;;
 
+		"-p")	shift
+			EXTRAPARAM="$1"
+			;;
+
 		*)
 			echo "unknown option $1"
 			exit 1
@@ -46,5 +51,5 @@ if [ "z${MONITOR}" = "z" ]; then
 	MONITOR="${MONITOR_STDIO}"
 fi
 
-qemu-system-i386 -s ${DEBUG} ${MONITOR} ${QDISPLAY} -hda disk00.raw
+qemu-system-i386 -s ${DEBUG} ${MONITOR} ${QDISPLAY} ${EXTRAPARAM} -hda disk00.raw
 
