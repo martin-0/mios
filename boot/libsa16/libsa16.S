@@ -633,6 +633,47 @@ getmem_E820:
 
 /* -============================-
  *				*
+ *	PIC and PIT functions	*
+ *				*
+ * -============================-
+*/
+
+.global init_8259
+.func init_8259
+init_8259:
+
+	/* ICW1 */
+	mov $0x11, %al				/* let's init PIC, use 4 W */
+	out %al, $0x20				/* PIC master */
+	out %al, $0xa0				/* PIC slave */
+	outb %al, $0x80				/* delay */
+
+	/* ICW2 */
+	mov $0x20, %al				/* IRQ0 to int 0x20 */
+	out %al, $0x21
+	mov $0x28, %al				/* IRQ8 to int 0x28 */
+	out %al, $0xa1
+	outb %al, $0x80
+
+	/* ICW3 */
+	mov $0x4, %al				/* master: IRQ2 */
+	out %al, $0x21
+	mov $0x2, %al				/* slave: bit notation: 010: 2 */
+	out %al, $0xa1
+	outb %al, $0x80
+
+	/* ICW4 */
+	mov $1, %al
+	out %al, $0x21
+	out %al, $0xa1
+	outb %al, $0x80
+
+	ret
+.endfunc
+
+
+/* -============================-
+ *				*
  *	debug functions		*
  *				*
  * -============================-
