@@ -45,16 +45,12 @@ uint32_t printf(char* fmt, ...) {
 
 								va_args++; va_args++;		// sizeof ptr* is 4, we pushed 8B on stack
 								break;
-						case 'u':	
-								// XXX: waaaait a minute ... 
-								// XXX: what was I thinking ? it doesn't work this way!
-								// XXX: this will be a bit more complicated .. 
-								lnr = *(long_t*)va_args;
-								helper_printf_u(lnr.high,0);
-								helper_printf_u(lnr.low,0);
 
-								va_args++; va_args++;		// sizeof ptr* is 4, we pushed 8B on stack
-								break;
+						/* XXX
+							Well, doing decimal integers is harder than I thought. I should figure that out just
+							out of curiosity. I failed to do this in two hrs or so I dedicated to this problem.
+							Moving on..
+						*/
 						default:
 								putc(*pchar);
 						}
@@ -185,18 +181,14 @@ int parse_memmap() {
                 "ACPI NVS memory"
         };
 	
-	printf("this is a test: %s\nhex: %x, %llx\ndecimal: %d, %u\nmisc:  %llm and %\nmisc2: \\ \\$ \\*", 
-		"meh", 0xcafec0de, 0xfffffffbeeef, -42, -43);
-
-	asm ("hlt");
-
 	uint64_t i;
 	clrscr();
 
 	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.entries, smap.entry_size);
 
+	// 32b print over 64b nrs ; should be ok for this use though..
 	for (i = 0; i < smap.entries; i++) {
-		printf("%llx - %llx\t%s\n", smap.data[i].base, (smap.data[i].base + smap.data[i].len), mem_type_desc[smap.data[i].type]);
+		printf("%p - %p\t%s\n", (uint32_t)smap.data[i].base, (uint32_t)(smap.data[i].base + smap.data[i].len), mem_type_desc[smap.data[i].type]);
 	}
 	return 0;
 }
