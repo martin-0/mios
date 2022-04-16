@@ -33,7 +33,7 @@ struct memory_map {
 #define	MAX_HEXDIGITS_INT_32		8
 #define	DIVISOR_INT_32			1000000000
 
-/* long long type */
+/* long long type ; I can use this with ROL/ROR macros */
 typedef struct long_t {
 	uint32_t low;
 	uint32_t high;
