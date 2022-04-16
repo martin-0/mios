@@ -59,6 +59,12 @@ prepm32:
 	/* prepare to jump to protected mode */
 	cli
 	lgdt (gdt_desc)
+	
+	
+	call set_idt
+	lidt (idt_desc)
+
+	call init_8259
 
 	movl %cr0, %eax				/* enable protected mode */
 	orl $1, %eax
@@ -74,9 +80,18 @@ pmode32:
 	movw %ax, %ss
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
+	sti
+
 	call parse_memmap
 
+	int $1
+
+foo:
 	nop
+
+
+	jmp foo
+
 	ljmp $0x18, $(pm2rm)
 pm2rm:
 
@@ -168,6 +183,104 @@ show_cur_ip:
 	pop %bp
 	ret
 
+/* A20 gate is already enabled */
+.global set_idt
+.func set_idt
+set_idt:
+	pushl %esi
+	pushl %ebx
+
+	movl $(idt), %ebx
+	leal (dummy_ir), %edx
+	movl %edx, %eax
+	shr $16, %eax
+	xor %ecx, %ecx
+	dec %cl
+.Lset:
+/*	
+	.word dummy_ir
+	.word 0x8
+	.byte 0, 0x8e
+	.word 0
+*/
+	movw %dx, (%ebx)
+	movw $8, 2(%ebx)
+	movw $0x8e00, 4(%ebx)
+	movw %ax, 6(%ebx)
+	
+	addl $8, %ebx
+	loop .Lset
+
+	movl $(idt), %ebx
+
+	leal (int20_dummy), %edx
+	movw %dx, 0x100(%ebx)
+
+	leal (int21_dummy), %edx
+	movw %dx, 0x108(%ebx)
+
+	leal (int20_dummy), %edx
+	movw %dx, 0x110(%ebx)
+
+	leal (int20_dummy), %edx
+	movw %dx, 0x118(%ebx)
+
+	leal (int20_dummy), %edx
+	movw %dx, 0x120(%ebx)
+
+	leal (int20_dummy), %edx
+	movw %dx, 0x128(%ebx)
+
+	leal (int20_dummy), %edx
+	movw %dx, 0x130(%ebx)
+
+	leal (int20_dummy), %edx
+	movw %dx, 0x138(%ebx)
+
+	pop %ebx	
+	pop %esi	
+	ret	
+.endfunc
+
+.global dummy_ir
+.func dummy_ir
+dummy_ir:
+	nop
+	nop
+	nop
+	iret
+.endfunc
+
+.global int20_dummy
+.func int20_dummy
+int20_dummy:
+	/* EOI */
+	mov $0x20, %al
+	out %al, $0x20
+	iret
+.endfunc
+
+.global int21_dummy
+.func int21_dummy
+int21_dummy:
+	.code32
+	nop
+	nop
+	movl $(int21), %eax
+	push %eax
+	call printf
+	pop %eax
+
+	in $0x60			/* need to read data from kbd or next irq may not work */
+
+	/* EOI */
+	mov $0x20, %al
+	out %al, $0x20
+
+	nop
+	iret
+.endfunc
+
 .section .data
 
 	/* GDT table definiion */
@@ -221,9 +334,27 @@ show_cur_ip:
 		*/
 	end_gdt:
 
-	bios_ivt:
-		.word 0x3ff
-		.word 0,0
+	/*
+	struct InterruptDescriptor32 {
+	   uint16_t offset_1;        // offset bits 0..15
+	   uint16_t selector;        // a code segment selector in GDT or LDT
+	   uint8_t  zero;            // unused, set to 0
+	   uint8_t  type_attributes; // gate type, dpl, and p fields
+	   uint16_t offset_2;        // offset bits 16..31
+	};
+		.word dummy_ir
+		.word 0x8
+		.byte 0, 0x8e
+		.word 0
+	*/
+
+	idt_desc:
+		.word end_idt-idt-1
+		.word idt,0
+	idt:
+		.fill 256, 8, 0
+	end_idt:
+
 
 	bootdrive:	.byte	0
 	lowmem:		.word	0
@@ -250,3 +381,7 @@ show_cur_ip:
 
 	dummy_str:	.asciz	"main: %p:%p\r\n"
 	msg_smap:	.asciz	"smap addr: 0x%p\r\n"
+
+	divzero:	.asciz	"dividing by 0!\r\n"
+
+	int21:		.asciz "kbd event\n"
