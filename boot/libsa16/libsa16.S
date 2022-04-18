@@ -638,9 +638,9 @@ getmem_E820:
  * -============================-
 */
 
-.global init_8259
-.func init_8259
-init_8259:
+.global init16_8259
+.func init16_8259
+init16_8259:
 
 	/* ICW1 */
 	mov $0x11, %al				/* let's init PIC, use 4 W */
@@ -656,9 +656,9 @@ init_8259:
 	outb %al, $0x80
 
 	/* ICW3 */
-	mov $0x4, %al				/* master: IRQ2 */
+	mov $0x4, %al				/* master: IRQ2 slave */
 	out %al, $0x21
-	mov $0x2, %al				/* slave: bit notation: 010: 2 */
+	mov $0x2, %al				/* slave: master at (bit notation): 010: 2 */
 	out %al, $0xa1
 	outb %al, $0x80
 
