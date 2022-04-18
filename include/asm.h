@@ -23,15 +23,15 @@ struct regs16 {
  *	+	Means that this operand is both read and written by the instruction.
  */
 
-static inline void outb(uint8_t val, uint16_t port) {
+static inline void outb(uint16_t port, uint8_t val) {
 	asm volatile("outb %0, %1" : : "a"(val), "dN"(port));
 }
 
-static inline void outw(uint16_t val, uint16_t port) {
+static inline void outw(uint16_t port, uint16_t val) {
 	asm volatile("outw %0, %1" : : "a"(val), "dN"(port));
 }
 
-static inline void outl(uint32_t val, uint16_t port) {
+static inline void outl(uint16_t port, uint32_t val) {
 	asm volatile("outl %0,%1" : : "a"(val), "dN"(port));
 }
 
@@ -105,6 +105,18 @@ static inline uint32_t rorr(uint32_t v) {
 	uint32_t t;
 	asm volatile("movl %1, %%eax; rorl $4, %%eax; movl %%eax, %0" : "=m"(t) : "r"(v));
 	return t;
+}
+
+static inline void delay_out(void) {
+	asm volatile("outb %al, $0x80");	
+}
+
+static inline void disable_interrupts(void) {
+	asm volatile ("cli");
+}
+
+static inline void enable_interrupts(void) {
+	asm volatile ("sti");
 }
 
 #endif /* HAVE_ASM_H */

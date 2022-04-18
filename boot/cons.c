@@ -62,6 +62,9 @@ void cputc(char c, char attrib) {
 				cursx += TABSPACE;
 			}
 			goto exit;
+
+	case '\r':	cursx = 0;
+			goto exit;
 	}
 	
 	*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | c; 
@@ -107,13 +110,15 @@ void setcursor() {
 	uint16_t pos = cursy * COLS + cursx;
 
 	// cursor low
-	outw(0xf, VGA_INDEX_REGISTER);
-	outb(pos & 0xff, VGA_DATA_REGISTER);
+	outw(VGA_INDEX_REGISTER, 0xf);
+	outb(VGA_DATA_REGISTER, pos & 0xff);
 	
 	// cursor high
-	outw(0xe, VGA_INDEX_REGISTER);
-	outb( (pos >> 8 ) & 0xff, VGA_DATA_REGISTER);
+	outw(VGA_INDEX_REGISTER, 0xe);
+	outb(VGA_DATA_REGISTER, (pos >> 8 ) & 0xff);
 
+	/* this was needed for realmode
 	uint16_t* bios_cursor = (uint16_t*)0x450;
 	*bios_cursor = cursy << 8 | cursx;
+	*/
 }
