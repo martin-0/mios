@@ -29,7 +29,7 @@ REALMODE_CFLAGS+=-I$(INCDIR)
 CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mregparm=3
 CFLAGS+=-I$(INCDIR)
 
-SRCO=boot1.o libsa16.o cons.o libsa.o
+SRCO=boot1.o libsa16.o cons.o libsa.o pic.o
 
 .PHONY: pmbr
 all: gboot
@@ -50,6 +50,9 @@ cons.o:	cons.c cons.h
 
 libsa.o: libsa.c libsa.h cons.o
 	$(CC) $(CFLAGS) libsa.c -c -o $(OBJDIR)/libsa.o
+
+pic.o: pic.c pic.h
+	$(CC) $(CFLAGS) pic.c -c -o $(OBJDIR)/pic.o
 
 pmbr:
 	make -C pmbr
