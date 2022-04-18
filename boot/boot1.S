@@ -19,39 +19,21 @@ _start:
 	movw %ax, %gs
 
 	movb %dl, (bootdrive)
-	leaw (msg), %si
+	leaw (msg_boot1), %si
 	call puts16
 
-	/* XXX: right now only detecting it to see if we have any EBDA memory region */
-	call detect_low_mem
-
-	test %ax, %ax
-	jz Lfatalerr
-
-	/* print the memory */
-	inc %ax
-	push %ax
-	leaw (msg_memlow), %si
-	call printf16
 
 	/* Attemp to enable the A20 gate */
 	call enable_A20
 	test %ax, %ax
 	jz prepm32
 
-	leaw (fatal_a20), %si
+	leaw (fatal_a20), %si			/* fatal error if we can't have A20 */
 	call printf16
 	jmp Lfatalerr
 
 prepm32:
-	leaw (ok_a20), %si
-	call printf16
-
-	pushw $(smap)				/* XXX: info only */
-	leaw (msg_smap), %si
-	call printf16
-
-	pushw $(smap)
+	pushw $(smap)				/* detect memory with E820 */
 	call getmem_E820
 	test %ax, %ax
 	jnz Lfatalerr
@@ -59,12 +41,6 @@ prepm32:
 	/* prepare to jump to protected mode */
 	cli
 	lgdt (gdt_desc)
-	
-	
-	call set_idt
-	lidt (idt_desc)
-
-	call init_8259
 
 	movl %cr0, %eax				/* enable protected mode */
 	orl $1, %eax
@@ -80,180 +56,93 @@ pmode32:
 	movw %ax, %ss
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
-	sti
+	call set_idt
+	call install_dummyies	
+	lidt (idt_desc)
+
+	call init_8259
+	call init_pit
 
 	call parse_memmap
 
-	int $1
-
-foo:
-	nop
-
-
-	jmp foo
-
-	ljmp $0x18, $(pm2rm)
-pm2rm:
-
-	movl $0x20, %eax
-	movw %ax, %ds
-	movw %ax, %es
-	movw %ax, %ss
-	movw %ax, %fs
-	movw %ax, %bx
-
-	movl %cr0, %eax
-	dec %ax
-	//andl 0xfffffffe, %eax
-	movl %eax, %cr0
-	xorl %eax, %eax
-
-	
-	ljmp $0, $(rm1)
-	/* XXX: this is _a way to go back to realmode .. i should stick to vm86 though */
-rm1:
-	.code16
-	nop
-	nop
-	xorw %ax, %ax
-	movw %ax, %es
-	movw %ax, %ds
-	movw %ax, %ss
-	movw %ax, %fs
-	movw $0x7bfc, %sp
-
-rm16:
 	sti
 
-	leaw (msg_debug3), %si
-	call puts16
+	int $1
+	
+foo:
+	/*
+	pushl (ticks)
+	pushl $(strticks)
+	call printf
+	addl $8, %esp
+	*/
 
-	nop
-	call show_cur_ip
-
-	leaw (msg_debug4), %si
-	call puts16
-
-	movw $0x1000, %ax
-	int $0x16
-
-	leaw (msg_debug5), %si
-	call puts16
-
-keys:
-	movw $0x1000, %ax
-	int $0x16
-
-	xor %bx, %bx
-	movb $0x0e, %ah
-	int $0x10
-
-	cmpb $0x71, %al
-	je off
-	jmp keys
-
-	jmp off
-
-	/* NOTE:
-	 *
-	 *	Next: create and test interface for BIOS calls - the VM86 mode. 
-	 */
+	hlt
+	jmp foo
 
 Lfatalerr:
 	leaw (fatal_error), %si
 	call puts16
 
 off:
-	leaw (msg_end), %si
-	call puts16
 	cli
 	hlt
 	jmp off
 
-/* temporary things i test */
-show_cur_ip:
-	push %bp
-	movw %sp, %bp
-	pushw 2(%bp)
-	push %cs
-	leaw (msg_debug1), %si
-	call printf16	
-	addw $4, %sp
-	
-	pop %bp
-	ret
 
-/* A20 gate is already enabled */
 .global set_idt
 .func set_idt
 set_idt:
 	pushl %esi
 	pushl %ebx
 
-	movl $(idt), %ebx
-	leal (dummy_ir), %edx
-	movl %edx, %eax
+	movl $(idt), %ebx				/* start of the IDT */
+	leal (dummy_isr_handler), %edx			/* install the dummy ISR handler */
+	movl %edx, %eax					/* base HI into eax */
 	shr $16, %eax
 	xor %ecx, %ecx
-	dec %cl
-.Lset:
-/*	
-	.word dummy_ir
-	.word 0x8
-	.byte 0, 0x8e
-	.word 0
-*/
-	movw %dx, (%ebx)
-	movw $8, 2(%ebx)
-	movw $0x8e00, 4(%ebx)
-	movw %ax, 6(%ebx)
+	dec %cl						/* 255 entries */
+.Lset_default:
+
+	movw %dx, (%ebx)				/* base LO */
+	movw $8, 2(%ebx)				/* CS selector 0x8 */
+	//movw $0x8e00, 4(%ebx)				/* interrupt, 32bit */
+	movw $0x8f00, 4(%ebx)				/* trap, 32bit */
+	movw %ax, 6(%ebx)				/* base HI  */
 	
 	addl $8, %ebx
-	loop .Lset
+	loop .Lset_default
 
-	movl $(idt), %ebx
+	movl $(idt), %ebx				/* start of the IDT */
+	movb $16, %cl
 
-	leal (int20_dummy), %edx
-	movw %dx, 0x100(%ebx)
+	leal (dummy_irq_handler), %edx			/* install the dummy IRQ handler */
+	movl %edx, %eax					/* base HI into eax */
+	shr $16, %eax
 
-	leal (int21_dummy), %edx
-	movw %dx, 0x108(%ebx)
+	/* start from 0x20 */
+.Lset_irq_default:
+	movw %dx, 0x100(%ebx)				/* base LO */
+	movw $8, 0x102(%ebx)				/* CS selector 0x8 */
+	movw $0x8e00, 0x104(%ebx)			/* interrupt, 32bit */
+	movw %ax, 0x106(%ebx)				/* base HI  */
+	
+	addl $8, %ebx
+	loop .Lset_irq_default
 
-	leal (int20_dummy), %edx
-	movw %dx, 0x110(%ebx)
-
-	leal (int20_dummy), %edx
-	movw %dx, 0x118(%ebx)
-
-	leal (int20_dummy), %edx
-	movw %dx, 0x120(%ebx)
-
-	leal (int20_dummy), %edx
-	movw %dx, 0x128(%ebx)
-
-	leal (int20_dummy), %edx
-	movw %dx, 0x130(%ebx)
-
-	leal (int20_dummy), %edx
-	movw %dx, 0x138(%ebx)
-
-	pop %ebx	
-	pop %esi	
+	popl %ebx	
+	popl %esi	
 	ret	
 .endfunc
 
-.global dummy_ir
-.func dummy_ir
-dummy_ir:
-	nop
-	nop
-	nop
-	iret
-.endfunc
+/* install handler */
+.global install_handler
 
 .global int20_dummy
 .func int20_dummy
 int20_dummy:
+	incl (ticks)
+
 	/* EOI */
 	mov $0x20, %al
 	out %al, $0x20
@@ -263,7 +152,6 @@ int20_dummy:
 .global int21_dummy
 .func int21_dummy
 int21_dummy:
-	.code32
 	nop
 	nop
 	movl $(int21), %eax
@@ -271,7 +159,7 @@ int21_dummy:
 	call printf
 	pop %eax
 
-	in $0x60			/* need to read data from kbd or next irq may not work */
+	inb $0x60			/* need to read data from kbd or next irq may not work */
 
 	/* EOI */
 	mov $0x20, %al
@@ -280,6 +168,26 @@ int21_dummy:
 	nop
 	iret
 .endfunc
+
+/* IRQ handler that does nothing */
+.global dummy_irq_handler
+.func dummy_irq_handler
+dummy_irq_handler:
+	push %eax
+
+	mov $0x20, %al			/* EOI */
+	out %al, $0x20
+	pop %eax
+	iret
+.endfunc
+
+/* ISR handler that does nothing */
+.global dummy_isr_handler
+.func dummy_isr_handler
+dummy_isr_handler:
+	iret
+.endfunc
+
 
 .section .data
 
@@ -351,37 +259,24 @@ int21_dummy:
 	idt_desc:
 		.word end_idt-idt-1
 		.word idt,0
+
+	.global idt
 	idt:
 		.fill 256, 8, 0
 	end_idt:
 
+	ticks:		.quad	0
 
 	bootdrive:	.byte	0
-	lowmem:		.word	0
 
-	msg:	.asciz	"boot1\r\n"
-	debug:	.asciz	"DBEUG"
-	debug1:	.asciz	"debug1: %s\r\nhex tripplet: %x %x %x\r\npointer: %p\r\nunsigned val: %u\r\nsigned val: %d\r\nchars: %c %c %c\r\n"
-
-	msg_memlow:	.asciz	"low memory: %uKB\r\n"
+	/* ascii messages */
+	msg_boot1:	.asciz	"MIOS boot1\r\n"
 
 	fatal_error:	.asciz	"FATAL ERROR: system halted.\r\n"
 	fatal_a20:	.asciz	"Failed to activate A20 gate, aborting.\r\n"
-	ok_a20:		.asciz	"A20 gate enabled.\r\n"
-
-	msg_hello_mi:	.asciz	"Hello from MIOS protected mode."
-
-	msg_debug1:	.asciz	"current cs:ip: %x:%x\r\n"	
-	msg_debug2:	.asciz	"gdt size: 0x%x\r\n"
-	msg_debug3:	.asciz	"back to realmode\r\n"
-	msg_debug4:	.asciz	"press any key to continue..\r\n"
-	msg_debug5:	.asciz	"infinite loop..\r\n"
-
-	msg_end:	.asciz	"\r\nEND.\r\n"
-
-	dummy_str:	.asciz	"main: %p:%p\r\n"
-	msg_smap:	.asciz	"smap addr: 0x%p\r\n"
-
-	divzero:	.asciz	"dividing by 0!\r\n"
 
 	int21:		.asciz "kbd event\n"
+	strticks:	.asciz "ticks: %d\r"
+
+	s_addr:		.asciz "addr: %p\n"
+	err_unhandled:	.asciz	"unhandled interrupt.\n"
