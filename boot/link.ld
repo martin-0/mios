@@ -18,6 +18,7 @@ SECTIONS
 		__c32start = . ; 
 		cons.o(.*)
 		libsa.o(.*)
+		pic.o(.*)
 	}
 
     /* Discard common unwanted/unneeded sections */
