@@ -42,7 +42,7 @@ typedef struct interrupt_desc_t {
 void init_8259(void);
 void send_8259_cmd(uint8_t ctrl, uint8_t cmd);
 int8_t read_8259(uint8_t ctrl);
-void send_EOI(uint8_t irq);
+void send_8259_EOI(uint8_t irq);
 
 /* PIT functions */
 void init_pit(void);

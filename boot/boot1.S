@@ -91,6 +91,7 @@ foo:
 smallfoo:
 	xorl %edx, %edx
 	movl (ticks), %eax
+	inc %eax	// if pic is not working
 	movl $0x100, %ecx
 	div %ecx	
 	test %edx, %edx

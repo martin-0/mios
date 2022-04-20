@@ -40,6 +40,18 @@ void init_8259(void) {
 	// on slave disable all IRQs
 	send_8259_cmd(SLAVE_PIC_COMMAND, ~0);
 
+	// XXX: issue on real HW; debugging
+	
+	uint8_t m_isr,s_isr;
+
+	send_8259_cmd(PRIMARY_PIC_COMMAND, OCW3_RQ_ISR);
+	m_isr = read_8259(PRIMARY_PIC_COMMAND);
+
+	send_8259_cmd(SLAVE_PIC_COMMAND, OCW3_RQ_ISR);
+	s_isr = read_8259(SLAVE_PIC_COMMAND);
+
+	if (m_isr || s_isr ) send_8259_EOI(m_isr || s_isr);
+
 	debug_status_8259();
 }
 
@@ -106,15 +118,24 @@ void install_dummies() {
 }
 
 void debug_status_8259(void) {
-	uint8_t r1,r2;
+	uint8_t r1,r2, r3;
 	send_8259_cmd(PRIMARY_PIC_COMMAND, OCW3_RQ_IRR);	// IR
 	r1 = read_8259(PRIMARY_PIC_COMMAND);
 	r2 = read_8259(PRIMARY_PIC_DATA);
-	printf("IRR: %x (pending ACKs)\nIMR: %x (mask)\n", r1,r2);
 
 	send_8259_cmd(PRIMARY_PIC_COMMAND, OCW3_RQ_ISR);	// IS
-	r1 = read_8259(PRIMARY_PIC_COMMAND);
-	printf("ISR: %x (EOI waiting)\n", r1);
+	r3 = read_8259(PRIMARY_PIC_COMMAND);
+
+	printf("master: IRR: %x (pending ACKs), IMR: %x (mask), ISR: %x (EOI waiting)\n", r1,r2,r3);
+
+	send_8259_cmd(SLAVE_PIC_COMMAND, OCW3_RQ_IRR);	// IR
+	r1 = read_8259(SLAVE_PIC_COMMAND);
+	r2 = read_8259(SLAVE_PIC_DATA);
+
+	send_8259_cmd(SLAVE_PIC_COMMAND, OCW3_RQ_ISR);	// IS
+	r3 = read_8259(SLAVE_PIC_COMMAND);
+
+	printf("slave: IRR: %x (pending ACKs), IMR: %x (mask), ISR: %x (EOI waiting)\n", r1,r2,r3);
 }
 
 void check_irq_stats(void) {
