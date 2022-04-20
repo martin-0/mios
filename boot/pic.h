@@ -54,5 +54,6 @@ void install_handler(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uin
 // debug
 void install_dummies();
 void debug_status_8259(void);
+void check_irq_stats(void);
 
 #endif /* ifndef HAVE_PIC_H */

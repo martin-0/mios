@@ -8,6 +8,7 @@
 #endif
 
 extern interrupt_desc_t idt[];
+extern uint32_t irq_stats[];
 
 extern void int20_dummy(void);
 extern void int21_dummy(void);
@@ -115,3 +116,11 @@ void debug_status_8259(void) {
 	r1 = read_8259(PRIMARY_PIC_COMMAND);
 	printf("ISR: %x (EOI waiting)\n", r1);
 }
+
+void check_irq_stats(void) {
+	uint32_t i;
+	for (i =0 ; i < 16; i++) {
+		printf("irq%d: %d\n", i, irq_stats[i]);
+	}
+}
+
