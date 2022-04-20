@@ -56,28 +56,48 @@ pmode32:
 	movw %ax, %ss
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
+	call clrscr
+
 	call set_idt
-	call install_dummyies	
 	lidt (idt_desc)
 
 	call init_8259
 	call init_pit
+	call install_dummies	
 
-	call parse_memmap
+        movl $(idt), %ebx
+	
+	movzxw 0x108(%ebx), %eax
+	push %eax
+	movzxw 0x100(%ebx), %eax
+	push %eax
+	pushl %ebx
+
+	pushl $(debug_msg1)
+	call printf
+
+	// call parse_memmap
 
 	sti
 
-	int $1
-	
 foo:
-	/*
-	pushl (ticks)
+	hlt
+	movl $0x100, %ecx	
+	xorl %edx, %edx
+	movl (ticks), %eax
+	push %eax
+	div %ecx
+	test %edx, %edx
+	pop %eax
+	jnz foo
+
+	push %eax	
 	pushl $(strticks)
 	call printf
-	addl $8, %esp
-	*/
+	addl $8, %esp			// poped with eax
 
-	hlt
+	call debug_status_8259
+
 	jmp foo
 
 Lfatalerr:
@@ -106,7 +126,6 @@ set_idt:
 
 	movw %dx, (%ebx)				/* base LO */
 	movw $8, 2(%ebx)				/* CS selector 0x8 */
-	//movw $0x8e00, 4(%ebx)				/* interrupt, 32bit */
 	movw $0x8f00, 4(%ebx)				/* trap, 32bit */
 	movw %ax, 6(%ebx)				/* base HI  */
 	
@@ -135,9 +154,6 @@ set_idt:
 	ret	
 .endfunc
 
-/* install handler */
-.global install_handler
-
 .global int20_dummy
 .func int20_dummy
 int20_dummy:
@@ -154,6 +170,7 @@ int20_dummy:
 int21_dummy:
 	nop
 	nop
+
 	movl $(int21), %eax
 	push %eax
 	call printf
@@ -276,7 +293,9 @@ dummy_isr_handler:
 	fatal_a20:	.asciz	"Failed to activate A20 gate, aborting.\r\n"
 
 	int21:		.asciz "kbd event\n"
-	strticks:	.asciz "ticks: %d\r"
+	strticks:	.asciz "ticks: %d\n"
 
 	s_addr:		.asciz "addr: %p\n"
 	err_unhandled:	.asciz	"unhandled interrupt.\n"
+
+	debug_msg1:	.asciz	"idt %p, 0x20: 0x%hx, 0x21: 0x%hx\n"
