@@ -2,11 +2,26 @@
 #define HAVE_PIC_H 
 
 /* PIC 8259 */
-#define	PRIMARY_PIC_CMD_STAT_REG	0x20
-#define	PRIMARY_PIC_IMR_DATA		0x21
-#define	SLAVE_PIC_CMD_STAT_REG		0xa0
-#define	SLAVE_PIC_IMR_DATA		0xa1
-#define	CMD_EOI				0x20
+#define	PRIMARY_PIC_COMMAND		0x20
+#define PRIMARY_PIC_DATA		0x21
+#define	SLAVE_PIC_COMMAND		0xa0
+#define	SLAVE_PIC_DATA			0xa1
+
+/*
+		A0	D7	D6	D5	D4	D3	D2	D1	D0
+	----------------------------------------------------------------------------
+	OCW1	1	M7	M6	M5	M4	M3	M2	M1	M0
+	OCW2	0	R	SL	EOI	0	0	L2	L1	L0
+	OCW3	0	0	ESMM	SMM	0	1	P	RR	RIS
+*/
+
+// OCW1 - read from DATA port
+
+// OCW3 uses COMMAND port (A0 is 0)
+#define	OCW3_RQ_IRR			0x0a
+#define	OCW3_RQ_ISR			0x0b
+
+#define	OCW2_EOI			0x20
 
 /* PIT 825x */
 #define	PIT_MODE_CMD_REG		0x43		/* write only */
@@ -23,9 +38,13 @@ typedef struct interrupt_desc_t {
 	uint16_t base_hi;
 } __attribute__((packed)) interrupt_desc_t;
 
+/* PIC functions */
 void init_8259(void);
+void send_8259_cmd(uint8_t ctrl, uint8_t cmd);
+int8_t read_8259(uint8_t ctrl);
 void send_EOI(uint8_t irq);
 
+/* PIT functions */
 void init_pit(void);
 
 typedef void (*interrupt_handler_t)();
@@ -33,6 +52,7 @@ typedef void (*interrupt_handler_t)();
 void install_handler(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uint8_t type);
 
 // debug
-void install_dummyies();
+void install_dummies();
+void debug_status_8259(void);
 
 #endif /* ifndef HAVE_PIC_H */
