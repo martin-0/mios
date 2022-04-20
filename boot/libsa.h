@@ -17,6 +17,14 @@
 	asm volatile("movl %1, %%eax; rorl $4, %%eax; movl %%eax, %0" : "=m"(n) : "r"(n) : "eax" );	\
 } while(0)
 
+#define	ROLH(n) do { 											\
+	asm volatile("movw %1, %%ax; rolw $4, %%ax; movw %%ax, %0" : "=m"(n) : "r"(n) : "ax" );	\
+} while(0)
+
+#define	RORH(n) do { 											\
+	asm volatile("movw %1, %%ax; rorw $4, %%ax; movw %%ax, %0" : "=m"(n) : "r"(n) : "ax" );	\
+} while(0)
+
 struct memory_map_t {
 	uint64_t	base;
 	uint64_t	len;
@@ -30,6 +38,7 @@ struct memory_map {
 	struct memory_map_t	data[128];
 } __attribute__((packed));
 
+#define	MAX_HEXDIGITS_INT_16		4
 #define	MAX_HEXDIGITS_INT_32		8
 #define	DIVISOR_INT_32			1000000000
 
@@ -44,6 +53,7 @@ int parse_memmap();
 
 uint32_t printf(char* fmt, ...);
 void helper_printf_x(uint32_t nr, char lz, char ofst);
+void helper_printf_x16(uint16_t nr, char lz, char ofst);
 void helper_printf_u(uint32_t nr, char lz);
 
 #endif /* ifndef HAVE_LIBSA_H */

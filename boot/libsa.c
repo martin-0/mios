@@ -16,18 +16,27 @@ uint32_t printf(char* fmt, ...) {
 	long_t lnr;
 	char c, islz;
 
+	// Right now we treat % as something special. Anything else goes to putc().
 	while (*pchar != '\0') {
+
 		switch(*pchar) {
 		// FMT specifier
-		case '%': 	if (*(pchar+1) == '\0') {		// just print % if this is the last char
+		case '%': 	// there's nothing else to check if % is the last char
+				if (*(pchar+1) == '\0') {
 					putc('%');
 					break;
 				}
 		
-				// go through known formats	
+				// advance pchar and check what we have
 				switch(*(++pchar)) {
-				case 'l':
+				case 'l':	// check for end of str
+						if (*(pchar+1) == '\0') {
+							putc('l');
+							break;
+						}
+
 						// if second argument is not l just continue with the print
+						// XXX: so %lx is not a valid format then ..
 						if (*(++pchar) != 'l') {
 							putc(*pchar);
 							break;
@@ -55,6 +64,31 @@ uint32_t printf(char* fmt, ...) {
 								putc(*pchar);
 						}
 						break;
+
+				case 'h':	// half-word size
+						if (*(pchar+1) == '\0') {
+							putc('h');
+							break;
+						}
+						
+						// XXX: word size format for Xx only for now
+						switch(*(++pchar)) {
+						case 'x':
+						case 'X':
+								islz = 1;
+								c = (*pchar & 0x20) ? 0x57 : 0x37;
+								uint16_t nr2 = *(uint16_t*)va_args;
+
+								helper_printf_x16(nr2, islz, c);
+
+								va_args++;
+								break;
+						default:
+								putc(*pchar);
+						}
+
+						break;
+						
 				case 'p':
 				case 'X':
 				case 'x':	
@@ -142,6 +176,26 @@ void helper_printf_x(uint32_t nr, char lz, char ofst) {
 
 		if (lz) {
 			if(i != (MAX_HEXDIGITS_INT_32-1) && c == 0) continue;
+			else lz = 0;
+		}
+		if (c < 10) c += 0x30;
+		else {
+			c+= ofst;
+		}
+		putc(c);
+	}
+}
+
+void helper_printf_x16(uint16_t nr, char lz, char ofst) {
+	uint16_t i;
+	char c;
+
+	for (i = 0; i < MAX_HEXDIGITS_INT_16 ; i++) {
+		ROLH(nr);
+		c = nr & 0xf;
+
+		if (lz) {
+			if(i != (MAX_HEXDIGITS_INT_16-1) && c == 0) continue;
 			else lz = 0;
 		}
 		if (c < 10) c += 0x30;
