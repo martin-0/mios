@@ -62,7 +62,7 @@ void send_8259_EOI(uint8_t irq) {
 void init_pit(void) {
 	outb(PIT_MODE_CMD_REG, 0x36);		/* ch0, lo/hi access, square wave gen, count in 16bit binary */
 	
-	/* XXX: using static FQ - 100hz, 0x2a9b- for channel 0 */
+	/* XXX: using static FQ 100hz (0x2a9b) for channel 0 */
 	outb(PIT_CHANNEL_0, 0x9b);
 	delay_out();
 	outb(PIT_CHANNEL_0, 0x2e);
