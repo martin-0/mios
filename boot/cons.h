@@ -17,6 +17,7 @@
 
 void clrscr();
 void clearto(unsigned char newx, unsigned char newy);
+void scroll();
 
 void setcursor();
 void puts(char* s);

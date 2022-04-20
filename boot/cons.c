@@ -14,6 +14,8 @@ uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;
 unsigned char cursx, cursy;
 unsigned char COLS = 80, ROWS = 25;
 
+// XXX: it doesn't handle \t or \r
+// XXX: i could call the cputc in the loop ; idea was to speed it up, no sure there's much of a benefit here though
 void puts(char* s) {
 	uint16_t pos, vgac;
 	char c;
@@ -21,8 +23,8 @@ void puts(char* s) {
 	vgac = (DEFAULT_CHAR_ATTRIB << 8); 
 	while ((c = *s++)) { 
 		if (c == '\n') { 
-			cursy++;
 			cursx = 0;
+			if (cursy++ == ROWS) scroll();
 			goto cursor_adjust;
 		}
 
@@ -36,7 +38,7 @@ void puts(char* s) {
 		cursx++;
 		if (cursx > COLS) { 
 			cursx = 0;
-			cursy++;
+			if (cursy++ == ROWS) scroll();
 		}	
 cursor_adjust:
 		setcursor();
@@ -48,9 +50,11 @@ void cputc(char c, char attrib) {
 	/* handle special cases of character */
 	switch (c) { 
 			// XXX: does it make sense to cleanup the screen up to COLS ? probably yes .. 
-	case '\n':	clearto(cursy, cursx);
+	case '\n':	
 			cursy++;
 			cursx =0;
+			clearto(cursy, cursx);
+
 			goto exit;
 
 			// XXX: well, tabs are more sophisticated than this, but for the time being ok
@@ -75,7 +79,26 @@ void cputc(char c, char attrib) {
 		cursy++;
 	}
 exit:
+	if (cursy == ROWS) scroll();
 	setcursor();
+}
+
+// scroll down n rows
+void scroll() {
+	uint32_t* lvga_text = (uint32_t*)VGA_SCREEN;
+	uint32_t i;
+
+	// (80 * 2 ) / 4 = 40 - offset from lvga_screen
+	// (80 *2 * 24 ) / 4 = 920 moves
+
+	for (i = 0; i < 960 ; i++) {
+		//*(lvga_text+40+i) = *(lvga_text+i);
+		*(lvga_text+i) = *(lvga_text+40+i);
+	}
+	for( ; i < 960+40; i++) {
+		*(lvga_text+i) = 0x07200720;	// blank out the last line
+	}
+	cursy = ROWS-1;
 }
 
 void clearto(unsigned char newx, unsigned char newy) {
@@ -100,12 +123,15 @@ void clrscr() {
 	}
 
 	cursx = cursy = 0;
-	uint32_t *ptr = (uint32_t*)0x450;	// XXX: updating for BIOS
-	*ptr = 0; ptr++; 
-	*ptr = 0;
+	
+	/*
+	uint32_t *ptr = (uint32_t*)0x450;
+	*ptr = 0; ptr++; *ptr = 0;
+	*/
 	setcursor();	
 }
 
+// XXX: should we assert cursy/cursx ?
 void setcursor() { 
 	uint16_t pos = cursy * COLS + cursx;
 
