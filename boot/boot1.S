@@ -58,12 +58,17 @@ pmode32:
 
 	call clrscr
 
-	call set_idt
+	call set_idt				/* prepare IDT */
 	lidt (idt_desc)
 
-	call init_8259
+	call init_8259				/* PIC and PIT */
 	call init_pit
-	call install_dummies	
+
+	// enable irq 0,1,2
+	mov $0xf8, %al
+	out %al, $0x21
+	
+	//call install_dummies	
 
         movl $(idt), %ebx
 	
@@ -71,34 +76,26 @@ pmode32:
 	push %eax
 	movzxw 0x100(%ebx), %eax
 	push %eax
-	pushl %ebx
-
+	push %ebx
 	pushl $(debug_msg1)
 	call printf
 
 	// call parse_memmap
 
 	sti
-
 foo:
-	hlt
-	movl $0x100, %ecx	
-	xorl %edx, %edx
-	movl (ticks), %eax
-	push %eax
-	div %ecx
-	test %edx, %edx
-	pop %eax
-	jnz foo
-
-	push %eax	
-	pushl $(strticks)
-	call printf
-	addl $8, %esp			// poped with eax
-
+	call clrscr
+	call check_irq_stats
 	call debug_status_8259
 
-	jmp foo
+smallfoo:
+	xorl %edx, %edx
+	movl (ticks), %eax
+	movl $0x100, %ecx
+	div %ecx	
+	test %edx, %edx
+	jz foo
+	jmp smallfoo
 
 Lfatalerr:
 	leaw (fatal_error), %si
@@ -135,18 +132,23 @@ set_idt:
 	movl $(idt), %ebx				/* start of the IDT */
 	movb $16, %cl
 
-	leal (dummy_irq_handler), %edx			/* install the dummy IRQ handler */
-	movl %edx, %eax					/* base HI into eax */
-	shr $16, %eax
+	leal (dummy_irq_wrapper), %edx
+
+	//leal (dummy_irq_handler), %edx			/* install the dummy IRQ handler */
+	//movl %edx, %eax					/* base HI into eax */
+	//shr $16, %eax
 
 	/* start from 0x20 */
 .Lset_irq_default:
+	movl %edx, %eax					/* base HI into eax */
+	shr $16, %eax
 	movw %dx, 0x100(%ebx)				/* base LO */
 	movw $8, 0x102(%ebx)				/* CS selector 0x8 */
 	movw $0x8e00, 0x104(%ebx)			/* interrupt, 32bit */
 	movw %ax, 0x106(%ebx)				/* base HI  */
 	
 	addl $8, %ebx
+	addl $4, %edx
 	loop .Lset_irq_default
 
 	popl %ebx	
@@ -158,19 +160,17 @@ set_idt:
 .func int20_dummy
 int20_dummy:
 	incl (ticks)
-
-	/* EOI */
+	ret
+/*
 	mov $0x20, %al
 	out %al, $0x20
 	iret
+*/
 .endfunc
 
 .global int21_dummy
 .func int21_dummy
 int21_dummy:
-	nop
-	nop
-
 	movl $(int21), %eax
 	push %eax
 	call printf
@@ -178,24 +178,96 @@ int21_dummy:
 
 	inb $0x60			/* need to read data from kbd or next irq may not work */
 
-	/* EOI */
+	/*
 	mov $0x20, %al
 	out %al, $0x20
 
 	nop
 	iret
+	*/
+	ret
+.endfunc
+
+.align 8
+.global dummy_irq_wrapper
+.func dummy_irq_wrapper
+dummy_irq_wrapper:
+	pushl $0
+	jmp irq_dispatch
+	pushl $1
+	jmp irq_dispatch
+	pushl $2
+	jmp irq_dispatch
+	pushl $3
+	jmp irq_dispatch
+	pushl $4
+	jmp irq_dispatch
+	pushl $5
+	jmp irq_dispatch
+	pushl $6
+	jmp irq_dispatch
+	pushl $7
+	jmp irq_dispatch
+	pushl $8
+	jmp irq_dispatch
+	pushl $9
+	jmp irq_dispatch
+	pushl $0xa
+	jmp irq_dispatch
+	pushl $0xb
+	jmp irq_dispatch
+	pushl $0xc
+	jmp irq_dispatch
+	pushl $0xd
+	jmp irq_dispatch
+	pushl $0xe
+	jmp irq_dispatch
+	pushl $0xf
+	jmp irq_dispatch
+
+irq_dispatch:
+
+	pushal		// flags are pushed with irqs
+
+	movl 0x20(%esp), %eax			// keep IRQ stats
+	incl irq_stats(,%eax,4)
+
+	test %eax, %eax
+	jne 1f
+	call int20_dummy
+	jmp cleanup
+1:
+	cmp $1, %eax
+	jne 2f
+	call int21_dummy
+	jmp cleanup
+
+2:
+	call dummy_irq_handler
+
+cleanup:
+	// inc stats and show the results
+	mov $0x20, %al			/* EOI */
+	out %al, $0x20
+
+	popal
+	addl $4, %esp
+	iret
+
 .endfunc
 
 /* IRQ handler that does nothing */
 .global dummy_irq_handler
 .func dummy_irq_handler
 dummy_irq_handler:
+	ret // returns to dummy_irq_wrapper
+/*
 	push %eax
-
-	mov $0x20, %al			/* EOI */
+	mov $0x20, %al	// EOI
 	out %al, $0x20
 	pop %eax
 	iret
+*/
 .endfunc
 
 /* ISR handler that does nothing */
@@ -277,12 +349,16 @@ dummy_isr_handler:
 		.word end_idt-idt-1
 		.word idt,0
 
+	.align 16
 	.global idt
 	idt:
 		.fill 256, 8, 0
 	end_idt:
 
 	ticks:		.quad	0
+
+	.global irq_stats
+	irq_stats: .long 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
 	bootdrive:	.byte	0
 
@@ -299,3 +375,4 @@ dummy_isr_handler:
 	err_unhandled:	.asciz	"unhandled interrupt.\n"
 
 	debug_msg1:	.asciz	"idt %p, 0x20: 0x%hx, 0x21: 0x%hx\n"
+	debug_msg2:	.asciz	"nr: %d\n"
