@@ -18,10 +18,9 @@ _start:
 	movw %ax, %fs
 	movw %ax, %gs
 
-	movb %dl, (bootdrive)
+	movb %dl, (bootdrive)			/* XXX: will I need this ? */
 	leaw (msg_boot1), %si
 	call puts16
-
 
 	/* Attemp to enable the A20 gate */
 	call enable_A20
@@ -57,46 +56,15 @@ pmode32:
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
 	call clrscr
-
-	call set_idt				/* prepare IDT */
-	lidt (idt_desc)
+	call init_idt
+	lidt (IDT)
 
 	call init_8259				/* PIC and PIT */
 	call init_pit
+	sti 					/* enable interrupts */
 
-	// enable irq 0,1,2
-	mov $0xf8, %al
-	out %al, $0x21
-	
-	//call install_dummies	
-
-        movl $(idt), %ebx
-	
-	movzxw 0x108(%ebx), %eax
-	push %eax
-	movzxw 0x100(%ebx), %eax
-	push %eax
-	push %ebx
-	pushl $(debug_msg1)
-	call printf
-
-	// call parse_memmap
-
-	sti
-foo:
-	call clrscr
-	call check_irq_stats
-	call debug_status_8259
-
-smallfoo:
-	xorl %edx, %edx
-	movl (ticks), %eax
-	inc %eax	// if pic is not working
-	movl $0x100, %ecx
-	div %ecx	
-	test %edx, %edx
-	jz foo
-	jmp smallfoo
+	call gboot_main
+	jmp off					/* in case of I return from gboot_main */
 
 Lfatalerr:
 	leaw (fatal_error), %si
@@ -106,177 +74,6 @@ off:
 	cli
 	hlt
 	jmp off
-
-
-.global set_idt
-.func set_idt
-set_idt:
-	pushl %esi
-	pushl %ebx
-
-	movl $(idt), %ebx				/* start of the IDT */
-	leal (dummy_isr_handler), %edx			/* install the dummy ISR handler */
-	movl %edx, %eax					/* base HI into eax */
-	shr $16, %eax
-	xor %ecx, %ecx
-	dec %cl						/* 255 entries */
-.Lset_default:
-
-	movw %dx, (%ebx)				/* base LO */
-	movw $8, 2(%ebx)				/* CS selector 0x8 */
-	movw $0x8f00, 4(%ebx)				/* trap, 32bit */
-	movw %ax, 6(%ebx)				/* base HI  */
-	
-	addl $8, %ebx
-	loop .Lset_default
-
-	movl $(idt), %ebx				/* start of the IDT */
-	movb $16, %cl
-
-	leal (dummy_irq_wrapper), %edx
-
-	//leal (dummy_irq_handler), %edx			/* install the dummy IRQ handler */
-	//movl %edx, %eax					/* base HI into eax */
-	//shr $16, %eax
-
-	/* start from 0x20 */
-.Lset_irq_default:
-	movl %edx, %eax					/* base HI into eax */
-	shr $16, %eax
-	movw %dx, 0x100(%ebx)				/* base LO */
-	movw $8, 0x102(%ebx)				/* CS selector 0x8 */
-	movw $0x8e00, 0x104(%ebx)			/* interrupt, 32bit */
-	movw %ax, 0x106(%ebx)				/* base HI  */
-	
-	addl $8, %ebx
-	addl $4, %edx
-	loop .Lset_irq_default
-
-	popl %ebx	
-	popl %esi	
-	ret	
-.endfunc
-
-.global int20_dummy
-.func int20_dummy
-int20_dummy:
-	incl (ticks)
-	ret
-/*
-	mov $0x20, %al
-	out %al, $0x20
-	iret
-*/
-.endfunc
-
-.global int21_dummy
-.func int21_dummy
-int21_dummy:
-	movl $(int21), %eax
-	push %eax
-	call printf
-	pop %eax
-
-	inb $0x60			/* need to read data from kbd or next irq may not work */
-
-	/*
-	mov $0x20, %al
-	out %al, $0x20
-
-	nop
-	iret
-	*/
-	ret
-.endfunc
-
-.align 8
-.global dummy_irq_wrapper
-.func dummy_irq_wrapper
-dummy_irq_wrapper:
-	pushl $0
-	jmp irq_dispatch
-	pushl $1
-	jmp irq_dispatch
-	pushl $2
-	jmp irq_dispatch
-	pushl $3
-	jmp irq_dispatch
-	pushl $4
-	jmp irq_dispatch
-	pushl $5
-	jmp irq_dispatch
-	pushl $6
-	jmp irq_dispatch
-	pushl $7
-	jmp irq_dispatch
-	pushl $8
-	jmp irq_dispatch
-	pushl $9
-	jmp irq_dispatch
-	pushl $0xa
-	jmp irq_dispatch
-	pushl $0xb
-	jmp irq_dispatch
-	pushl $0xc
-	jmp irq_dispatch
-	pushl $0xd
-	jmp irq_dispatch
-	pushl $0xe
-	jmp irq_dispatch
-	pushl $0xf
-	jmp irq_dispatch
-
-irq_dispatch:
-
-	pushal		// flags are pushed with irqs
-
-	movl 0x20(%esp), %eax			// keep IRQ stats
-	incl irq_stats(,%eax,4)
-
-	test %eax, %eax
-	jne 1f
-	call int20_dummy
-	jmp cleanup
-1:
-	cmp $1, %eax
-	jne 2f
-	call int21_dummy
-	jmp cleanup
-
-2:
-	call dummy_irq_handler
-
-cleanup:
-	// inc stats and show the results
-	mov $0x20, %al			/* EOI */
-	out %al, $0x20
-
-	popal
-	addl $4, %esp
-	iret
-
-.endfunc
-
-/* IRQ handler that does nothing */
-.global dummy_irq_handler
-.func dummy_irq_handler
-dummy_irq_handler:
-	ret // returns to dummy_irq_wrapper
-/*
-	push %eax
-	mov $0x20, %al	// EOI
-	out %al, $0x20
-	pop %eax
-	iret
-*/
-.endfunc
-
-/* ISR handler that does nothing */
-.global dummy_isr_handler
-.func dummy_isr_handler
-dummy_isr_handler:
-	iret
-.endfunc
 
 
 .section .data
@@ -332,48 +129,9 @@ dummy_isr_handler:
 		*/
 	end_gdt:
 
-	/*
-	struct InterruptDescriptor32 {
-	   uint16_t offset_1;        // offset bits 0..15
-	   uint16_t selector;        // a code segment selector in GDT or LDT
-	   uint8_t  zero;            // unused, set to 0
-	   uint8_t  type_attributes; // gate type, dpl, and p fields
-	   uint16_t offset_2;        // offset bits 16..31
-	};
-		.word dummy_ir
-		.word 0x8
-		.byte 0, 0x8e
-		.word 0
-	*/
-
-	idt_desc:
-		.word end_idt-idt-1
-		.word idt,0
-
-	.align 16
-	.global idt
-	idt:
-		.fill 256, 8, 0
-	end_idt:
-
-	ticks:		.quad	0
-
-	.global irq_stats
-	irq_stats: .long 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-
+	.global bootdrive
 	bootdrive:	.byte	0
 
-	/* ascii messages */
 	msg_boot1:	.asciz	"MIOS boot1\r\n"
-
 	fatal_error:	.asciz	"FATAL ERROR: system halted.\r\n"
 	fatal_a20:	.asciz	"Failed to activate A20 gate, aborting.\r\n"
-
-	int21:		.asciz "kbd event\n"
-	strticks:	.asciz "ticks: %d\n"
-
-	s_addr:		.asciz "addr: %p\n"
-	err_unhandled:	.asciz	"unhandled interrupt.\n"
-
-	debug_msg1:	.asciz	"idt %p, 0x20: 0x%hx, 0x21: 0x%hx\n"
-	debug_msg2:	.asciz	"nr: %d\n"
