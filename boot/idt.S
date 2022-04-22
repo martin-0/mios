@@ -42,34 +42,30 @@ irq_main_handler:
 irq_dispatch:
 	pushal
 
-	/* XXX
-	  	Should I care about the error code here? Not all IRQs produce the error code .. 
-	
-		What about IMR ? Maybe I should mask the interrupt in IMR, send EOI and let the
-		IRQ handler do the rest ?  
-	*/
+	/* XXX Should I care about the error code here? Not all IRQs produce the error code ..  */
 	
         movl 0x20(%esp), %esi                   /* irq number saved on stack */
 	leal irq_stats(,%esi,8), %ebx		/* update irq stats */
         addl $1, (%ebx)				/* 64b counters */
 	adcl $0, 4(%ebx)
 
-	push %esi				/* used before the irq handler is called */
+	pushl %esi				/* used before the irq handler is called */
 	call mask_irq				/* irq pushed on stack */
 
 	/* XXX: Does it make sense to mess it up like this ? Or should I just pop the previous value and
 		have the stack as it should be. 
-		I could use the regparam=3 too, that would probably save me some trouble too.. 
+		I could use the regparam=3 too, that would probably save me some trouble.. 
 	*/
 
-	pushl %esp				/* by pusing irq on stack i have now [ irq | pusha | irq | ip | cs | flags ] on stack */
+	pushl %esp				/* by pushing irq on stack i have now [ irq | pusha | irq | ip | cs | flags ] on stack */
 
 	movl $(irq_handlers), %ebx		/* dispatch to proper irq handler */
-	call *(%ebx,%esi,4)			/* XXX: handler sending EOI */
+	call *(%ebx,%esi,4)			/* NOTE: handler sends EOI */
 
+	push %esi
 	call clear_irq				/* NOTE: irq is pushed on stack now */
 
-	addl $8, %esp				/* revert back the stack */
+	addl $12, %esp				/* revert back the stack */
 	popal
 	addl $4, %esp
 	iret

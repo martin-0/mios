@@ -250,7 +250,7 @@ void check_irq_stats(void) {
 }
 
 void debug_dump_irqframe(struct irqframe* f) {
-	printf("frame irq: %d\nEIP: %p\tESP: %p\tEBP: %p\n"
+	printf("interrupt: %d\nEIP: %p\tESP: %p\tEBP: %p\n"
 		"EAX: %p\tEBX: %p\tECX: %p\nEDX: %p\tEDI: %p\tESI: %p\n"
 		"CS: 0x%hx\tEFLAGS: %p\n",
 			f->irq, f->eip, f->esp, f->ebp, f->eax, f->ebx, f->ecx, f->edx, f->edi, f->esi, f->cs, f->eflags);

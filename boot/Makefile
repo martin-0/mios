@@ -28,7 +28,7 @@ REALMODE_CFLAGS+=-I$(INCDIR)
 
 CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4
 #  -mregparm=3
-CFLAGS+=-I$(INCDIR) -DDEBUG
+CFLAGS+=-I$(INCDIR) -DDEBUG -DDEBUG_IRQ
 
 SRCO=boot1.o libsa16.o cons.o libsa.o pic.o idt.o main.o
 
@@ -56,7 +56,7 @@ libsa.o: libsa.c libsa.h
 	$(CC) $(CFLAGS) libsa.c -c -o $(OBJDIR)/libsa.o
 
 pic.o: pic.c pic.h 
-	$(CC) $(CFLAGS) -mgeneral-regs-only pic.c -c -o $(OBJDIR)/pic.o
+	$(CC) $(CFLAGS) pic.c -c -o $(OBJDIR)/pic.o
 
 main.o: main.c 
 	$(CC) $(CFLAGS) main.c -c -o $(OBJDIR)/main.o
