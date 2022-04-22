@@ -34,6 +34,7 @@ void cputc(char c, char attrib) {
 			t = TABSPACE - (cursx % TABSPACE);
 
 			if (cursx + t > COLS ) { 
+				clearto(COLS);
 				cursy++;
 				cursx = 0;
 			}
