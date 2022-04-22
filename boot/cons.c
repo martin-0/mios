@@ -13,55 +13,33 @@ uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;		// XXX: probably not needed as glo
 unsigned char cursx, cursy;
 unsigned char COLS = 80, ROWS = 25;
 
-// XXX: it doesn't handle \t or \r
-// XXX: i could call the cputc in the loop ; idea was to speed it up, no sure there's much of a benefit here though
 void puts(char* s) {
-	uint16_t pos, vgac;
 	char c;
-
-	vgac = (DEFAULT_CHAR_ATTRIB << 8); 
-	while ((c = *s++)) { 
-		if (c == '\n') { 
-			cursx = 0;
-			if (cursy++ == ROWS) scroll();
-			goto cursor_adjust;
-		}
-
-		// set attribute
-		*(char*)(&vgac) = c;
-
-		// print char
-		pos = cursy * COLS + cursx;
-		*(ivga_text + pos) = vgac;
-	
-		cursx++;
-		if (cursx > COLS) { 
-			cursx = 0;
-			if (cursy++ == ROWS) scroll();
-		}	
-cursor_adjust:
-		setcursor();
+	while ((c = *s++)) {
+		cputc(c, DEFAULT_CHAR_ATTRIB);
 	}
-
 }
 
 void cputc(char c, char attrib) {
+	uint16_t t;
 	/* handle special cases of character */
 	switch (c) { 
 	case '\n':	
 			clearto(COLS);
 			cursy++;
 			cursx =0;
-
 			goto exit;
 
-			// XXX: well, tabs are more sophisticated than this, but for the time being ok
-	case '\t':	if (cursx + TABSPACE > COLS ) {
+	case '\t':	
+			t = TABSPACE - (cursx % TABSPACE);
+
+			if (cursx + t > COLS ) { 
 				cursy++;
-				cursx = cursx + TABSPACE - COLS;
+				cursx = 0;
 			}
 			else {
-				cursx += TABSPACE;
+				clearto(cursx+t);
+				cursx += t;
 			}
 			goto exit;
 
@@ -70,13 +48,13 @@ void cputc(char c, char attrib) {
 	}
 	
 	*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | c; 
-		
 	cursx++;
-	if (cursx > COLS) { 
+
+exit:
+	if (cursx >= COLS) { 
 		cursx = 0;
 		cursy++;
 	}
-exit:
 	if (cursy == ROWS) scroll();
 	setcursor();
 }
@@ -100,11 +78,12 @@ void scroll() {
 }
 
 void clearto(unsigned char newx) { 
-	return ; /// XXX broken
-	uint32_t i,c = newx-cursx;
-
+	uint16_t pos,i;
+	uint8_t c = newx-cursx;
+	
+	pos = cursy*COLS+cursx;
 	for (i = 0; i < c; i++) {
-		*(ivga_text+i) = 0x0720;
+		*(ivga_text+pos+i) = 0x0720;
 	}
 }
 
