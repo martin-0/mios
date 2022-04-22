@@ -55,7 +55,7 @@ cons.o:	cons.c cons.h
 libsa.o: libsa.c libsa.h
 	$(CC) $(CFLAGS) libsa.c -c -o $(OBJDIR)/libsa.o
 
-pic.o: pic.c pic.h
+pic.o: pic.c pic.h 
 	$(CC) $(CFLAGS) -mgeneral-regs-only pic.c -c -o $(OBJDIR)/pic.o
 
 main.o: main.c 

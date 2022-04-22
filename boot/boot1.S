@@ -53,14 +53,20 @@ pmode32:
 	movw %ax, %ds
 	movw %ax, %es
 	movw %ax, %ss
+	movw %ax, %fs
+	movw %ax, %gs
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
 	call clrscr
-	call init_idt
+
+	call init_idt				/* setup the tables */
 	lidt (IDT)
 
 	call init_8259				/* PIC and PIT */
 	call init_pit
+
+	call debug_install_irq1
+
 	sti 					/* enable interrupts */
 
 	call gboot_main

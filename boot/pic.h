@@ -1,6 +1,8 @@
 #ifndef HAVE_PIC_H
 #define HAVE_PIC_H 
 
+#include "asm.h"
+
 /* PIC 8259 */
 #define	MASTER_PIC_COMMAND		0x20
 #define MASTER_PIC_DATA			0x21
@@ -46,18 +48,20 @@ typedef struct interrupt_desc {
 	uint16_t base_hi;
 } __attribute__((packed)) interrupt_desc_t;
 
+
 typedef struct idt {
 	uint16_t size;
 	interrupt_desc_t* idt_desc;
 } __attribute__((packed)) idt_t;
 
+
 typedef void (*interrupt_handler_t)();
 
 /* PIC functions */
 void init_8259(void);
-void send_8259_cmd(uint8_t ctrl, uint8_t cmd);
-int8_t read_8259(uint8_t ctrl);
 void send_8259_EOI(uint8_t irq);
+void mask_irq(uint8_t irq);
+void clear_irq(uint8_t irq);
 
 /* PIT functions */
 void init_pit(void);
@@ -65,10 +69,13 @@ void init_pit(void);
 void install_handler(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uint8_t type);
 
 // debug
-void debug_status_8259(void);
+void debug_status_8259(char* caller);
 void check_irq_stats(void);
 
-void irq0_handler(void);
-void irq1_handler(void);
+void irq0_handler(struct irqframe* f);
+void irq1_handler(struct irqframe* f);
+
+void debug_install_irq1(void);
+void debug_dump_irqframe(struct irqframe* f);
 
 #endif /* ifndef HAVE_PIC_H */

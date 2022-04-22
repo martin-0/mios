@@ -3,12 +3,20 @@
 
 #include <stdint.h>
 
-/* in order whihc pusha saves them */
-
-struct regs16 {
-	uint16_t	ax,cx,dx,bx,sp,bp,si,di;
-	uint16_t	efl;
-	uint16_t	es,cs,ss,ds,fs;
+struct irqframe {
+	uint32_t	irq;
+	uint32_t	edi;
+	uint32_t	esi;
+	uint32_t	ebp;
+	uint32_t	esp;
+	uint32_t	ebx;
+	uint32_t	edx;
+	uint32_t	ecx;
+	uint32_t	eax;
+	uint32_t	:32;		// placeholder for irq on stack
+	uint32_t	eip;
+	uint32_t	cs;
+	uint32_t	eflags;
 } __attribute__((packed));
 
 /*
