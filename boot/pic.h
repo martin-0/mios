@@ -2,8 +2,8 @@
 #define HAVE_PIC_H 
 
 /* PIC 8259 */
-#define	PRIMARY_PIC_COMMAND		0x20
-#define PRIMARY_PIC_DATA		0x21
+#define	MASTER_PIC_COMMAND		0x20
+#define MASTER_PIC_DATA			0x21
 #define	SLAVE_PIC_COMMAND		0xa0
 #define	SLAVE_PIC_DATA			0xa1
 
@@ -29,14 +29,29 @@
 #define	PIT_CHANNEL_1			0x41
 #define	PIT_CHANNEL_2			0x42
 
+#define	IDT_ENTRIES			256
+#define	IRQ_ENTRIES			16
+
+#define	KERN_CS				0x8		// comes from GDT
+
+#define	IDT_GATE32_TRAP			0x8f		// IDT descriptor values
+#define	IDT_GATE32_IRQ			0x8e
+
 /* IDT descriptor */
-typedef struct interrupt_desc_t {
+typedef struct interrupt_desc {
 	uint16_t base_lo;
 	uint16_t selector;
 	uint8_t reserved;
 	uint8_t type;
 	uint16_t base_hi;
 } __attribute__((packed)) interrupt_desc_t;
+
+typedef struct idt {
+	uint16_t size;
+	interrupt_desc_t* idt_desc;
+} __attribute__((packed)) idt_t;
+
+typedef void (*interrupt_handler_t)();
 
 /* PIC functions */
 void init_8259(void);
@@ -47,13 +62,13 @@ void send_8259_EOI(uint8_t irq);
 /* PIT functions */
 void init_pit(void);
 
-typedef void (*interrupt_handler_t)();
-
 void install_handler(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uint8_t type);
 
 // debug
-void install_dummies();
 void debug_status_8259(void);
 void check_irq_stats(void);
+
+void irq0_handler(void);
+void irq1_handler(void);
 
 #endif /* ifndef HAVE_PIC_H */

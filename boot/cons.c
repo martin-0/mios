@@ -4,8 +4,7 @@
 #include "cons.h"
 #include "libsa.h"
 
-unsigned char* vga_text = (unsigned char*)VGA_SCREEN;
-uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;
+uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;		// XXX: probably not needed as global variable .. 
 
 // XXX:	well, this is an assumption .. we don't know what screen size we're set to .. 
 //	for the time being it's ok
@@ -49,11 +48,10 @@ cursor_adjust:
 void cputc(char c, char attrib) {
 	/* handle special cases of character */
 	switch (c) { 
-			// XXX: does it make sense to cleanup the screen up to COLS ? probably yes .. 
 	case '\n':	
+			clearto(COLS);
 			cursy++;
 			cursx =0;
-			clearto(cursy, cursx);
 
 			goto exit;
 
@@ -101,18 +99,13 @@ void scroll() {
 	cursy = ROWS-1;
 }
 
-void clearto(unsigned char newx, unsigned char newy) {
-	return;
-	uint16_t* lvga_text = (uint16_t*)VGA_SCREEN;
-	uint16_t curpos = (cursy*ROWS+cursx) << 1;
-	uint16_t newpos = (newy*ROWS+newx-1) << 1;
-	uint16_t pos, i;
+void clearto(unsigned char newx) { 
+	return ; /// XXX broken
+	uint32_t i,c = newx-cursx;
 
-	if (newpos <= curpos)
-		return;
-	
-	for (pos = 0, i =0; pos < (newpos-curpos); i+=2, pos++)
-		*(lvga_text+curpos+i) = 0x0720;
+	for (i = 0; i < c; i++) {
+		*(ivga_text+i) = 0x0720;
+	}
 }
 
 void clrscr() { 

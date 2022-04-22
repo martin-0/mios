@@ -16,7 +16,7 @@
 #define	DEFAULT_CHAR_ATTRIB	WHITE_ON_BLACK
 
 void clrscr();
-void clearto(unsigned char newx, unsigned char newy);
+void clearto(unsigned char newx);
 void scroll();
 
 void setcursor();

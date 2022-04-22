@@ -18,7 +18,7 @@ ASFLAGS=--defsym LINKADDR=$(LINKADDR)
 
 # used for debugging
 #LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N -M
-LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N
+LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N 
 
 # inspired by https://elixir.bootlin.com/linux/v4.20.17/source/arch/x86/Makefile
 REALMODE_CFLAGS:=-m16 -g -Os -Wall -Wstrict-prototypes -march=i386 -mregparm=3 \
@@ -26,10 +26,11 @@ REALMODE_CFLAGS:=-m16 -g -Os -Wall -Wstrict-prototypes -march=i386 -mregparm=3 \
 		-mno-mmx -mno-sse -ffreestanding -fno-stack-protector -mpreferred-stack-boundary=2
 REALMODE_CFLAGS+=-I$(INCDIR)
 
-CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mregparm=3
+CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4
+#  -mregparm=3
 CFLAGS+=-I$(INCDIR) -DDEBUG
 
-SRCO=boot1.o libsa16.o cons.o libsa.o pic.o
+SRCO=boot1.o libsa16.o cons.o libsa.o pic.o idt.o main.o
 
 .PHONY: pmbr
 all: gboot
@@ -42,17 +43,23 @@ gboot:	$(SRCO)
 boot1.o: boot1.S
 	$(AS) $(ASFLAGS) boot1.S -o $(OBJDIR)/boot1.o
 
+idt.o: idt.S
+	$(AS) idt.S -o $(OBJDIR)/idt.o
+
 libsa16.o: libsa16/libsa16.S
 	$(AS) libsa16/libsa16.S -o $(OBJDIR)/libsa16.o
 
 cons.o:	cons.c cons.h
 	$(CC) $(CFLAGS) cons.c -c -o $(OBJDIR)/cons.o
 
-libsa.o: libsa.c libsa.h cons.o
+libsa.o: libsa.c libsa.h
 	$(CC) $(CFLAGS) libsa.c -c -o $(OBJDIR)/libsa.o
 
 pic.o: pic.c pic.h
-	$(CC) $(CFLAGS) pic.c -c -o $(OBJDIR)/pic.o
+	$(CC) $(CFLAGS) -mgeneral-regs-only pic.c -c -o $(OBJDIR)/pic.o
+
+main.o: main.c 
+	$(CC) $(CFLAGS) main.c -c -o $(OBJDIR)/main.o
 
 pmbr:
 	make -C pmbr

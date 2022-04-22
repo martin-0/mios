@@ -16,9 +16,11 @@ SECTIONS
 
 	.code32 : {
 		__c32start = . ; 
+		pic.o(.*)
+		idt.o(.*)
 		cons.o(.*)
 		libsa.o(.*)
-		pic.o(.*)
+		main.o(.*)
 	}
 
     /* Discard common unwanted/unneeded sections */
