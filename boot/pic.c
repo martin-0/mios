@@ -22,7 +22,6 @@ extern void trap_handler_dflt();
 extern void irq_main_handler();
 extern void irq_handler_dflt();
 
-extern uint64_t ticks;
 extern void irq_dispatch();
 
 void init_8259(void) {
