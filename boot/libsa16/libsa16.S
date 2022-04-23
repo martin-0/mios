@@ -611,12 +611,24 @@ getmem_E820:
 	inc %esi				/* entries++ */
 	addw $24, %di
 
+	cmpl $64, %esi				/* we don't have buffer for 64+ */
+	jg .Ltoomany				/* max entries reached */
+
 .Lskip:
 	movb $24, %cl				/* forcing 24b acpi 3 */
 	movl $0x534d4150, %edx			/* SMAP */
 	movw $0xe820, %ax
 	int $0x15
 	jnc .Lget_entries
+	jmp .Le820unsupported			/* handle error */
+
+.Ltoomany:					/* too many entries, log it but end as success */
+	pushw %si
+	leaw (e820_err_entries), %si
+	call puts16				/* warn about it but don't report error */
+	popw %si				/* not desired behavior but for this purposes it's ok */
+	xor %ax, %ax
+	jmp .LE820end
 
 .Le820unsupported:
 	shr $8, %ax
@@ -733,6 +745,12 @@ dump_regs:
 		.ascii	"fs:        0x%x\r\n"
 		.asciz	"gs:        0x%x\r\n"
 
+	e820_err_entries:	.asciz	"Too many memory entries (64+) detected!\r\nMemory map is not complete.\r\n"
+
+	.ifdef DEBUG_A20
+		dbg_a20_test:	.asciz	"%p:%p    0x%x\r\n%p:%p    0x%x\r\nax: 0x%x\r\n"
+	.endif
+
 	/* smap entry is:
 		.quad base, length
 		.long type, xattr (acpi 3)
@@ -742,10 +760,4 @@ dump_regs:
 	smap:
 		.long 0, 0				/* entries ; entry size */
 	smap_data:	
-		.lcomm data, 4096			/* actual data */
-
-
-	.ifdef DEBUG_A20
-		dbg_a20_test:	.asciz	"%p:%p    0x%x\r\n%p:%p    0x%x\r\nax: 0x%x\r\n"
-	.endif
-
+		.zero 1536				/* actual data, 24*64 = 1536 */
