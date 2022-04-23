@@ -23,6 +23,7 @@ extern void trap_handler_dflt();
 extern void irq_main_handler();
 extern void irq_handler_dflt();
 extern void irq_dispatch();
+extern void nmi_trap();
 
 // NOTE: static inlines can't be included in headers
 static inline void write_8259(uint8_t ctrl, uint8_t cmd) {
@@ -196,6 +197,12 @@ void init_idt() {
 		irq_handlers[i] = irq_handler_dflt;
 	}
 
+	// XXX: testing
+
+	printf("init_idt: nmi_trap: %p\n", nmi_trap);
+	setup_idt_entry(nmi_trap, KERN_CS, 2, IDT_GATE32_TRAP);
+
+
 	#ifdef DEBUG_IRQ
 		debug_status_8259("init_idt");
 	#endif	
@@ -210,10 +217,29 @@ void irq1_handler(struct irqframe* f) {
 	uint8_t scancode = inb(0x60);
 	printf("scan code: %x\n", scancode);
 
-	if (scancode == 0x20)
-		debug_dump_irqframe(f);
+	// little debugging
+	switch(scancode) {
+	case 0x1f:	check_irq_stats();
+			break;
+
+	case 0x17:	debug_status_8259("irq1_handler");
+			break;
+
+	case 0x20:
+			debug_dump_irqframe(f);
+			break;
+
+	case 0x32:	__asm__ ("int $2");
+			break;
+
+	}
 
 	send_8259_EOI(1);
+}
+
+void handle_nmi(struct irqframe* f, uint16_t reason) {
+	printf("NMI reason: %x\n", reason);
+	debug_dump_irqframe(f);
 }
 
 void debug_status_8259(char* caller) {

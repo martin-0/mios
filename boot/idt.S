@@ -89,3 +89,25 @@ irq_handler_dflt:
 	xchg %eax, %eax
 	ret
 .endfunc
+
+/* XXX: testing*/
+.global nmi_trap
+.func nmi_trap
+nmi_trap:
+	pushl $2
+	pusha
+
+	inb $0x61				/* try to get the reason of NMI from port B */
+	movb %al, %dh
+
+	inb $0x92				/* try to get the reason of NMI from port A */
+	mov %al, %dl
+
+	movl %esp, %eax
+	call handle_nmi
+
+	popa
+	addl $4, %esp
+	iret
+.endfunc
+

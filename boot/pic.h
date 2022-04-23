@@ -78,4 +78,6 @@ void irq1_handler(struct irqframe* f);
 void debug_install_irq1(void);
 void debug_dump_irqframe(struct irqframe* f);
 
+void handle_nmi(struct irqframe* f, uint16_t reason);
+
 #endif /* ifndef HAVE_PIC_H */
