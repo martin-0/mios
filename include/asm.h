@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 struct irqframe {
-	uint32_t	:32;			// leftover from clear_irq
 	uint32_t	edi;
 	uint32_t	esi;
 	uint32_t	ebp;

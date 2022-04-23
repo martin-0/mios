@@ -88,7 +88,7 @@ void mask_irq(uint8_t irq) {
 
 	#ifdef DEBUG_IRQ
 		// too many msgs with irq0
-		if (irq) printf("maskr_irq%d: applying: %x\n", irq, cur_m);
+		if (irq) printf("mask_irq%d: applying: %x\n", irq, cur_m);
 	#endif
 
 	write_8259(ctrl, cur_m);

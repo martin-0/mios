@@ -1,3 +1,6 @@
+/* martin */
+
+/* NOTE: using regparm=3, eax,edx,ecx are used to pass args to function */
 
 .section .text
 	.code32
@@ -42,30 +45,32 @@ irq_main_handler:
 irq_dispatch:
 	pushal
 
-	/* XXX Should I care about the error code here? Not all IRQs produce the error code ..  */
+	/* XXX: there still is a problem with interrupt that does push error code, it's up to
+		this routine to clear this up. 
+	
+		One way of this would be to fake push 0 in irq_main_handler for those interrupts that don't push anything.
+		I need to manually adjust offsets in pic.c:init_idt()
+
+		This is also true for trap/exceptions. Different handler should be usd though..
+	*/
+		
 	
         movl 0x20(%esp), %esi                   /* irq number saved on stack */
 	leal irq_stats(,%esi,8), %ebx		/* update irq stats */
         addl $1, (%ebx)				/* 64b counters */
 	adcl $0, 4(%ebx)
 
-	pushl %esi				/* used before the irq handler is called */
-	call mask_irq				/* irq pushed on stack */
+	movl %esi, %eax				/* regparm(3), eax: irq */
+	call mask_irq
 
-	/* XXX: Does it make sense to mess it up like this ? Or should I just pop the previous value and
-		have the stack as it should be. 
-		I could use the regparam=3 too, that would probably save me some trouble.. 
-	*/
-
-	pushl %esp				/* by pushing irq on stack i have now [ irq | pusha | irq | ip | cs | flags ] on stack */
+	leal (%esp), %eax			/* irqframe, stack: [ pusha | irq ] */
 
 	movl $(irq_handlers), %ebx		/* dispatch to proper irq handler */
 	call *(%ebx,%esi,4)			/* NOTE: handler sends EOI */
 
-	push %esi
-	call clear_irq				/* NOTE: irq is pushed on stack now */
+	movl %esi, %eax				/* regparm(3), eax: irq */
+	call clear_irq
 
-	addl $12, %esp				/* revert back the stack */
 	popal
 	addl $4, %esp
 	iret
