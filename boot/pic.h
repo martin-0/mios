@@ -36,6 +36,7 @@
 
 #define	KERN_CS				0x8		// comes from GDT
 
+#define	IDT_TYPE_SEGMENT_PRESENT	0x80
 #define	IDT_GATE32_TRAP			0x8f		// IDT descriptor values
 #define	IDT_GATE32_IRQ			0x8e
 
@@ -49,6 +50,7 @@ typedef struct interrupt_desc {
 } __attribute__((packed)) interrupt_desc_t;
 
 
+// NOTE: should be 8B aligned 
 typedef struct idt {
 	uint16_t size;
 	interrupt_desc_t* idt_desc;

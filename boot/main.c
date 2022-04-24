@@ -15,6 +15,8 @@ void gboot_main() {
 	uint64_t old;
 	debug_status_8259("gboot_main");
 	printf("welcome to gboot_main\n");
+	
+	asm("int $0x80");
 
 	old = ticks;
 	for (;; ) {

@@ -49,9 +49,9 @@ irq_dispatch:
 		this routine to clear this up. 
 	
 		One way of this would be to fake push 0 in irq_main_handler for those interrupts that don't push anything.
-		I need to manually adjust offsets in pic.c:init_idt()
+		Note: Then I do need to manually adjust offsets in pic.c:init_idt()
 
-		This is also true for trap/exceptions. Different handler should be usd though..
+		This is also true for trap/exceptions. Different handler than this will be used though..
 	*/
 		
 	
@@ -76,18 +76,43 @@ irq_dispatch:
 	iret
 .endfunc
 
+// XXX: can't have handler like this
 .global trap_handler_dflt			/* just so we don't have empty IDT */
 .func trap_handler_dflt
 trap_handler_dflt:
 	nop
+	nop
+	inc %eax	// dummy
+	dec %eax
+	pop %eax
 	iret
 .endfunc
 
+// XXX: can't have handler like this
 .global irq_handler_dflt			/* IRQ handler goes through irq_main_handler */
 .func irq_handler_dflt
 irq_handler_dflt:
 	xchg %eax, %eax
 	ret
+.endfunc
+
+
+/* trying if callign out IDT entry where non-present segment is set will
+	generate gpf
+*/
+.global gpf_handler
+.func gpf_handler
+gpf_handler:
+	pusha
+	sti
+
+	/* error code on stack */
+	movl %esp, %eax
+	call debug_dump_irqframe
+	pop %eax
+	cli
+	popa
+	iret
 .endfunc
 
 /* XXX: testing*/
@@ -110,4 +135,3 @@ nmi_trap:
 	addl $4, %esp
 	iret
 .endfunc
-

@@ -8,7 +8,7 @@
 #endif
 
 interrupt_desc_t idt_entries[IDT_ENTRIES];			// IDT entries
-
+char c;
 idt_t IDT = {	.size = sizeof(idt_entries)-1,
 		.idt_desc = idt_entries
 	};
@@ -23,7 +23,9 @@ extern void trap_handler_dflt();
 extern void irq_main_handler();
 extern void irq_handler_dflt();
 extern void irq_dispatch();
+
 extern void nmi_trap();
+extern void gpf_handler();
 
 // NOTE: static inlines can't be included in headers
 static inline void write_8259(uint8_t ctrl, uint8_t cmd) {
@@ -187,21 +189,26 @@ void init_idt() {
 		ofst+=4;
 	}
 
-	// XXX: makes sense to set it to something .. 
+	// setup the rest of the IDT, segment marked as not present
+	// XXX: does it make more sense to rather use smaller IDT instead ?
+	// XXX: 
 	for (; i < IDT_ENTRIES; i++) {
-		setup_idt_entry(trap_handler_dflt, KERN_CS, i, IDT_GATE32_TRAP);
+		setup_idt_entry(trap_handler_dflt, KERN_CS, i, IDT_GATE32_TRAP & ~(IDT_TYPE_SEGMENT_PRESENT));
 	}
 
-	// default IRQ handlers for the rest
+	// default IRQ handlers
+	// XXX: IRQ0 and IRQ1 are set here in pic.c
 	for (i =0 ; i < IRQ_ENTRIES ; i++) { 
 		irq_handlers[i] = irq_handler_dflt;
 	}
 
 	// XXX: testing
-
 	printf("init_idt: nmi_trap: %p\n", nmi_trap);
 	setup_idt_entry(nmi_trap, KERN_CS, 2, IDT_GATE32_TRAP);
 
+        printf("init_idt: default trap handler: %p\n", trap_handler_dflt);
+        printf("init_idt: GPF handler: %p\n", gpf_handler);
+	setup_idt_entry(gpf_handler, KERN_CS, 13, IDT_GATE32_TRAP);
 
 	#ifdef DEBUG_IRQ
 		debug_status_8259("init_idt");
