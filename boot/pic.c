@@ -15,17 +15,68 @@ idt_t IDT = {	.size = sizeof(idt_entries)-1,
 
 volatile uint64_t ticks;					// IRQ0 ticks
 
+// XXX: shold rename interrupt_handler_t to idt_handler_t or something
+
 interrupt_handler_t irq_handlers[IRQ_ENTRIES];			// IRQ handlers
 uint64_t irq_stats[IRQ_ENTRIES];				// IRQ stats
+
+// in idt.S
+extern interrupt_handler_t trap_idt_entry[TRAP_ENTRIES_LOW];	// address in IDT entry
+trap_handler_t trap_handlers[TRAP_ENTRIES_LOW];			// actual trap handler
+
+trap_desc_t traps[TRAP_ENTRIES_LOW] = {
+		{ "Divide by zero",			0, 0 },
+		{ "Debug",				1, 0 },
+		{ "Non-maskable interrupt",		2, 0 },
+		{ "Breakpoint", 			3, 0 },
+		{ "Overflow",				4, 0 },
+		{ "Bound Range Exceedeed", 		5, 0 },
+		{ "Invalid opcode", 			6, 0 },
+		{ "Device not available",		7, 0 },
+		{ "Double fault",			8, 1 },
+		{ "Coprocessor Segment overrun",	9, 0 },		// legacy
+		{ "Invalid TSS",			10, 0 },
+		{ "Segment Not Present",		11, 1 },
+		{ "Stack segment fault",		12, 1 },
+		{ "General protection fault",		13, 1 },
+		{ "Page fault",				14, 1 },
+		{ "RESERVED",				15, 0 },
+		{ "x87 Floating-Point Exception",	16, 0,},
+		{ "Alignment Check",			17, 1 },
+		{ "Machine Check",			18, 0 },
+		{ "SIMD Floating-Point Exception",	19, 0 },
+		{ "Virtualization Exception",		20, 0 },
+		{ "Control Protection Exception",	21, 0 },
+		{ "RESERVED",				22, 0 },
+		{ "RESERVED",				23, 0 },
+		{ "RESERVED",				24, 0 },
+		{ "RESERVED",				25, 0 },
+		{ "RESERVED",				26, 0 },
+		{ "RESERVED",				27, 0 },
+		{ "Hypervisor Injection Exception",	28, 0 },
+		{ "VMM Communication Exception", 	29, 1 },
+		{ "Security Exception",			30, 1 },
+		{ "RESERVED",				31, 0 }
+	};
 
 // defined in idt.S
 extern void trap_handler_dflt();
 extern void irq_main_handler();
 extern void irq_handler_dflt();
-extern void irq_dispatch();
+extern void trap_bad_dummy();
 
-extern void nmi_trap();
-extern void gpf_handler();
+#ifdef DEBUG_IRQ
+	extern void irq_dispatch();
+#endif
+
+#ifdef DEBUG_TRAP
+	extern void trap_dispatch();
+#endif
+
+extern void int80_handler();
+extern void int11_handler();
+
+extern uint32_t* debug_trap;
 
 // NOTE: static inlines can't be included in headers
 static inline void write_8259(uint8_t ctrl, uint8_t cmd) {
@@ -38,6 +89,7 @@ static inline int8_t read_8259(uint8_t ctrl) {
 }
 
 void init_8259(void) {
+
 	// ICW1: send INIT to PICs
 	outb(MASTER_PIC_COMMAND, 0x11);
 	outb(SLAVE_PIC_COMMAND, 0x11);
@@ -173,42 +225,54 @@ void setup_idt_entry(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uin
 
 void init_idt() {
 	uint32_t i,ofst;
+
 	#ifdef DEBUG_IRQ
 		printf("init_idt: irq_main_handler: %p, dispatch: %p, ticks: %p\n", irq_main_handler, irq_dispatch, &ticks);
 	#endif
-	
-	// set default trap handler
-	for (i =0 ; i < 0x20 ; i++) { 
-		setup_idt_entry(trap_handler_dflt, KERN_CS, i, IDT_GATE32_TRAP);
+
+	#ifdef DEBUG_TRAP
+		printf("init_idt: trap_handler_dflt: %p, dispatch: %p\n", trap_handler_dflt, trap_dispatch);
+	#endif
+
+	//printf("init_idt: debug_trap: %p\n", &debug_trap);
+
+	// set the default lower traps
+	// XXX: traps are unhandled, we most likely end up in the infinite loop as saved ip is not modified
+	for (i =0 ; i < TRAP_ENTRIES_LOW; i++) {
+		setup_idt_entry(trap_idt_entry[i], KERN_CS, i, IDT_GATE32_TRAP);
+		//trap_handlers[i] = trap_bad_dummy;
+		trap_handlers[i] = debug_dump_trapframe;
 	}
 
-	// NOTE: idt.S defines irq_main_handler
+
 	ofst = 0;
-	for (; i < 0x30; i++) {
+	for (i = 0x20; i < 0x30; i++) {
 		setup_idt_entry(irq_main_handler+ofst, KERN_CS, i, IDT_GATE32_IRQ);
 		ofst+=4;
 	}
 
 	// setup the rest of the IDT, segment marked as not present
 	// XXX: does it make more sense to rather use smaller IDT instead ?
-	// XXX: 
 	for (; i < IDT_ENTRIES; i++) {
 		setup_idt_entry(trap_handler_dflt, KERN_CS, i, IDT_GATE32_TRAP & ~(IDT_TYPE_SEGMENT_PRESENT));
 	}
 
-	// default IRQ handlers
+	// default IRQ handler for non-assigned IRQ handlers
 	// XXX: IRQ0 and IRQ1 are set here in pic.c
 	for (i =0 ; i < IRQ_ENTRIES ; i++) { 
 		irq_handlers[i] = irq_handler_dflt;
 	}
 
-	// XXX: testing
-	printf("init_idt: nmi_trap: %p\n", nmi_trap);
-	setup_idt_entry(nmi_trap, KERN_CS, 2, IDT_GATE32_TRAP);
+	// XXX: experimenting with traps
 
-        printf("init_idt: default trap handler: %p\n", trap_handler_dflt);
-        printf("init_idt: GPF handler: %p\n", gpf_handler);
-	setup_idt_entry(gpf_handler, KERN_CS, 13, IDT_GATE32_TRAP);
+	// NP trap
+	// NOTE: this means trap_handlers[11] is not called
+	setup_idt_entry(int11_handler, KERN_CS, 11, IDT_GATE32_TRAP);
+
+	printf("init_idt: int11_handler: %p\n", int11_handler);
+
+	// trap that has unset P in type at IDT
+	setup_idt_entry(int80_handler, KERN_CS, 0x80, IDT_GATE32_TRAP & ~(IDT_TYPE_SEGMENT_PRESENT));
 
 	#ifdef DEBUG_IRQ
 		debug_status_8259("init_idt");
@@ -217,6 +281,7 @@ void init_idt() {
 
 void irq0_handler(struct irqframe* f) {
 	ticks++;
+	//asm("cli;hlt");
 	send_8259_EOI(0);
 }
 
@@ -224,29 +289,35 @@ void irq1_handler(struct irqframe* f) {
 	uint8_t scancode = inb(0x60);
 	printf("scan code: %x\n", scancode);
 
-	// little debugging
+	// XXX: debugging ; this really should not be part of the irq1 handler
 	switch(scancode) {
+	// S
 	case 0x1f:	check_irq_stats();
 			break;
 
+	// I
 	case 0x17:	debug_status_8259("irq1_handler");
 			break;
 
+	// P
+	case 0x19:	asm("int $0x80");
+			break;
+
+	// D
 	case 0x20:
 			debug_dump_irqframe(f);
 			break;
 
-	case 0x32:	__asm__ ("int $2");
+	// N
+	case 0x31:	__asm__ ("int $2");
+			break;
+
+	// M
+	case 0x32:	parse_memmap();
 			break;
 
 	}
-
 	send_8259_EOI(1);
-}
-
-void handle_nmi(struct irqframe* f, uint16_t reason) {
-	printf("NMI reason: %x\n", reason);
-	debug_dump_irqframe(f);
 }
 
 void debug_status_8259(char* caller) {
@@ -289,3 +360,13 @@ void debug_dump_irqframe(struct irqframe* f) {
 			f->irq, f->eip, f->esp, f->ebp, f->eax, f->ebx, f->ecx, f->edx, f->edi, f->esi, f->cs, f->eflags);
 }
 
+void debug_dump_trapframe(struct trapframe* f) {
+	printf("%s\ntrap error: %x\nEIP: %p\tESP: %p\tEBP: %p\n"
+		"EAX: %p\tEBX: %p\tECX: %p\nEDX: %p\tEDI: %p\tESI: %p\n"
+		"CS: 0x%hx\tEFLAGS: %p\n", traps[f->trapno].desc,
+			f->err, f->eip, f->esp, f->ebp, f->eax, f->ebx, f->ecx, f->edx, f->edi, f->esi, f->cs, f->eflags);
+}
+
+// XXX: set some temporary routines to debug stuff
+void debug_set_handlers() {
+}

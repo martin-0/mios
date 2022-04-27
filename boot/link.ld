@@ -23,10 +23,15 @@ SECTIONS
 		main.o(.*)
 	}
 
-    /* Discard common unwanted/unneeded sections */
-    /DISCARD/ : {
-        *(.comment);
-        *(.debug*);
-        *(.note.gnu.build-id);
-    }
+
+	/* Discard common unwanted/unneeded sections */
+	/DISCARD/ : {
+		*(.comment);
+		*(.debug*);
+		*(.note.gnu.build-id);
+	}
+
+	.signature : {
+		QUAD(0x1337decafe)
+	}
 }

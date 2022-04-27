@@ -32,7 +32,6 @@
 #define	PIT_CHANNEL_2			0x42
 
 #define	IDT_ENTRIES			256
-#define	IRQ_ENTRIES			16
 
 #define	KERN_CS				0x8		// comes from GDT
 
@@ -57,7 +56,11 @@ typedef struct idt {
 } __attribute__((packed)) idt_t;
 
 
+#define	IRQ_ENTRIES			16
 typedef void (*interrupt_handler_t)();
+
+#define	TRAP_ENTRIES_LOW		0x20			// first reserved exceptions/traps starting from 0 (0x0-0x1f)
+typedef void (*trap_handler_t)(struct trapframe* tf);
 
 /* PIC functions */
 void init_8259(void);
@@ -79,6 +82,7 @@ void irq1_handler(struct irqframe* f);
 
 void debug_install_irq1(void);
 void debug_dump_irqframe(struct irqframe* f);
+void debug_dump_trapframe(struct trapframe* f);
 
 void handle_nmi(struct irqframe* f, uint16_t reason);
 

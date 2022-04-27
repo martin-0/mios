@@ -27,8 +27,9 @@ REALMODE_CFLAGS:=-m16 -g -Os -Wall -Wstrict-prototypes -march=i386 -mregparm=3 \
 		-mno-mmx -mno-sse -ffreestanding -fno-stack-protector -mpreferred-stack-boundary=2
 REALMODE_CFLAGS+=-I$(INCDIR)
 
-CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4 -mregparm=3
-CFLAGS+=-I$(INCDIR) -DDEBUG
+# NOTE: -mregparm=3 brakes variadic function (such as printf)
+CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4
+CFLAGS+=-I$(INCDIR) -DDEBUG -DDEBUG_IRQ -DDEBUG_TRAP
 
 SRCO=boot1.o libsa16.o cons.o libsa.o pic.o idt.o main.o
 
