@@ -36,7 +36,6 @@
 	.globl _start
 
 _start:
-
 	/* 
 	 *	buffer:		0060:0000,	0x600 - 0x105FF		one 4k sector would end up at 0x15ff
 	 *	realloc:	07A0:0000,	0x7a00 - 0x179FF
@@ -88,10 +87,7 @@ _start:
 	jne .Lexterr
 
 	testb $1, %cl				/* bit0: extended disk access */
-	jz .Lexterr
-
-	testb $4, %cl				/* bit2: extended disk drive */
-	jz .Lexterr
+	jz .Lexterr2
 
 	cmpb $0x30, %ah				/* test for edd-3.0 first */
 	movb $0x42, %al				/* buffer size should be 0x42 */
@@ -169,7 +165,7 @@ _start:
 	loop .Lread_entries			/* end of the buffer, read the next sector */
 
 	/* we didn't find anything */
-	jmp .Lfatalerr
+	jmp .Lhalt
 
 .Lpartition_found:
 	/*
@@ -231,33 +227,39 @@ _start:
 
 	jmp $0, $0x7c00
 
-	/* Handle error codes */
+// ========================
+//	Error handling
+// ========================
+
 .Lerr_gpthdr:					/* invalid GPT header */
 	leaw (err_gpt_hdr), %si
-	call puts16
-	jmp .Lfatalerr
+	jmp .Lprint_err
 
 .Lreaderr_partial:				/* Partial read error, falls through to print read error */
 	leaw (err_partial), %si
-	call puts16
+	jmp .Lprint_err
 
 .Lreaderr:					/* disk read error */
 	leaw (err_generic), %si
-	call puts16
-	jmp .Lfatalerr
+	jmp .Lprint_err
 
 .Ldrv_param_err:				/* error during drive param checks */
 	leaw (err_drv_param), %si
-	call puts16
-	jmp .Lfatalerr
+	jmp .Lprint_err
 
 .Lexterr:					/* BIOS doesn't support extented read commands. */
 	leaw (err_noext), %si
-	call puts16
+	jmp .Lprint_err
+
+.Lexterr2:
+	leaw (err_noext2), %si
 	/* fall through to fatal error */
 
-.Lfatalerr:					/* fatal error, abort */
-	leaw (err_keyreboot), %si
+.Lprint_err:
+	call puts16				/* print error */
+
+.Lhalt:
+	leaw (err_halted), %si			/* print halted */
 	call puts16
 
 	xorw %ax,%ax
@@ -317,17 +319,18 @@ puts16:
 
 	gpt_hdr_signature:	.quad 0x5452415020494645
 
-	err_gpt_hdr:	.asciz	"No GPT hdr"
-	err_noext:	.asciz	"BIOS err"
-	err_partial:	.asciz	"Partial "
+	err_gpt_hdr:	.asciz	"No GPT header"
+	err_noext:	.asciz	"! BiosFunc"
+	err_noext2:	.asciz	"! DrvParm"
+	err_partial:	.ascii	"Partial "
 	err_generic:	.asciz	"read error."
-	err_keyreboot:	.asciz	"\r\nHalted.\r\n"
+	err_halted:	.asciz	"\r\nHalted.\r\n"
 
 	/* MBR partitions start here */
 	.= 0x1be
 
 	/* C/H/S start: 0/0/2, LBA 1 */
-	.byte 0			/* status: inactive */
+	.byte 0x80		/* status: active ; some BIOSes won't legacy boot GPT disk without it */
 	.byte 0,2,0		/* start of partition in CHS */
 	.byte 0xee		/* partition type: protective GPT */
 	.byte 0,0,0		/* end of partition in CHS ; externally updated */
