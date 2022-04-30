@@ -18,17 +18,16 @@ void gboot_main() {
 
 	printf("welcome to gboot_main\n");
 
-	//asm ("xorl %ecx, %ecx ; div %ecx");
-	//asm ("int $3");
-
 	old = ticks;
 	for (;; ) {
 		asm ("hlt");
+		/*
 		if ( (ticks % 4096 == 0) && ( old != ticks)) {
 			check_irq_stats();
 			debug_status_8259("main");
 			old = ticks;
 		}
+		*/
 	}
 
 }
