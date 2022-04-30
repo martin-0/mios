@@ -8,6 +8,8 @@ DEBUG=""
 QDISPLAY="-curses"
 EXTRAPARAM=""
 
+DISK="disk00.raw"
+
 # available options: 
 #	-m	monitor on stdio|telnet
 #	-d 	freeze CPU at start
@@ -51,5 +53,7 @@ if [ "z${MONITOR}" = "z" ]; then
 	MONITOR="${MONITOR_STDIO}"
 fi
 
-qemu-system-i386 -s ${DEBUG} ${MONITOR} ${QDISPLAY} ${EXTRAPARAM} -hda disk00.raw
+qemu-system-i386 -s ${DEBUG} ${MONITOR} ${QDISPLAY} ${EXTRAPARAM} \
+-drive id=disk,file=${DISK},if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0
 
+# -hda disk00.raw
