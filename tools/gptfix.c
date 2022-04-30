@@ -6,6 +6,7 @@
 #include <fcntl.h>
 
 #define	MAX_PMBR_CODE		0x1be			/* pmbr code should not be more than this */
+#define	PART1_BOOTFLAG		( (MAX_PMBR_CODE) + 1 )
 
 int fd = -1;
 int fd2 = -1;
@@ -40,7 +41,7 @@ int main(int argc, char** argv) {
 	}
 
 	/* load the new pmbr */	
-	if ((rb = read(fd2, buf, MAX_PMBR_CODE)) != MAX_PMBR_CODE) {
+	if ((rb = read(fd2, buf, PART1_BOOTFLAG)) != PART1_BOOTFLAG) {		// XXX: sgdisk was not able to set this on GPT, using it this way
 		perror("read pmbr");
 		return 4;
 	}

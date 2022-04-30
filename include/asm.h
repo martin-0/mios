@@ -152,4 +152,8 @@ static inline void enable_interrupts(void) {
 	asm volatile ("sti");
 }
 
+static inline void halt_cpu(void) {
+	asm volatile ("hlt");
+}
+
 #endif /* HAVE_ASM_H */

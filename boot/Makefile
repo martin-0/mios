@@ -29,9 +29,10 @@ REALMODE_CFLAGS+=-I$(INCDIR)
 
 # NOTE: -mregparm=3 brakes variadic function (such as printf)
 CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4
-CFLAGS+=-I$(INCDIR) -DDEBUG -DDEBUG_IRQ -DDEBUG_TRAP
+CFLAGS+=-I$(INCDIR) -DDEBUG -DDEBUG_TRAP
+#CFLAGS+=-DDEBUG_IRQ -DDEBUG_TRAP
 
-SRCO=boot1.o libsa16.o cons.o libsa.o pic.o idt.o main.o
+SRCO=boot1.o libsa16.o cons.o libsa.o pic.o idt.o main.o mm.o
 
 .PHONY: pmbr
 all: gboot
@@ -61,6 +62,9 @@ pic.o: pic.c pic.h
 
 main.o: main.c 
 	$(CC) $(CFLAGS) main.c -c -o $(OBJDIR)/main.o
+
+mm.o: mm.c
+	$(CC) $(CFLAGS) mm.c -c -o $(OBJDIR)/mm.o
 
 pmbr:
 	make -C pmbr

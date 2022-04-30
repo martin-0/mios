@@ -16,11 +16,12 @@ SECTIONS
 
 	.code32 : {
 		__c32start = . ; 
-		pic.o(.*)
+		pic.o(.*)			/* XXX: i should find better way than this */
 		idt.o(.*)
 		cons.o(.*)
 		libsa.o(.*)
 		main.o(.*)
+		mm.o(.*)
 	}
 
 
