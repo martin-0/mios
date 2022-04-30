@@ -7,6 +7,8 @@
 	#include "libsa.h"
 #endif
 
+#include "mm.h"	// XXX:  testmem() from irq1 handler
+
 interrupt_desc_t idt_entries[IDT_ENTRIES];			// IDT entries
 char c;
 idt_t IDT = {	.size = sizeof(idt_entries)-1,
@@ -291,6 +293,10 @@ void irq1_handler(struct irqframe* f) {
 
 	// XXX: debugging ; this really should not be part of the irq1 handler
 	switch(scancode) {
+	// T
+	case 0x14:	testmem();
+			break;
+
 	// S
 	case 0x1f:	check_irq_stats();
 			break;
@@ -307,7 +313,6 @@ void irq1_handler(struct irqframe* f) {
 	case 0x20:
 			debug_dump_irqframe(f);
 			break;
-
 	// N
 	case 0x31:	__asm__ ("int $2");
 			break;
@@ -317,6 +322,7 @@ void irq1_handler(struct irqframe* f) {
 			break;
 
 	}
+
 	send_8259_EOI(1);
 }
 
