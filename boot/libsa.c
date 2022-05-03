@@ -226,23 +226,3 @@ void dump_memory(uint32_t* addr, uint32_t size) {
 	putc('\n');
 }
 
-int parse_memmap() {
-	char* mem_type_desc[5] = {
-                "unknown",
-                "memory available to OS",
-                "reserved",
-                "ACPI reclaimable memory",
-                "ACPI NVS memory"
-        };
-	
-	uint64_t i;
-	clrscr();
-
-	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.entries, smap.entry_size);
-
-	// 32b print over 64b nrs ; should be ok for this use though..
-	for (i = 0; i < smap.entries; i++) {
-		printf("%p - %p\t%s\n", (uint32_t)smap.data[i].base, (uint32_t)(smap.data[i].base + smap.data[i].len), mem_type_desc[smap.data[i].type]);
-	}
-	return 0;
-}
