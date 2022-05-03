@@ -14,6 +14,7 @@ DISK="disk00.raw"
 #	-m	monitor on stdio|telnet
 #	-d 	freeze CPU at start
 #	-x	disable curses
+#	-p	extra parameters passed to qemu
 #
 while [ $# -gt 0 ]; do
 	case "$1" in
