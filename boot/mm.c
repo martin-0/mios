@@ -4,13 +4,19 @@
 #include "libsa.h"
 
 // libsa16
-extern memmap_t smap;
+extern e820_map_t smap;
 
+mem_map_t physical_map;
+
+// dummy test
 void testmem() { 
 	uint32_t* addr = (uint32_t*)0x100000;
 	uint32_t found,i;
 
-	for (i =0 ; i < smap.mm_count; i++) { 
+	printf("debug: testmem: enter\n");
+	//asm("cli;hlt");
+
+	for (i =0 ; i < smap.count; i++) { 
 		if (smap.map[i].e_base >= (uint64_t)0x100000) {
 			printf("found map, index %d, base: 0x%llx, size: 0x%llx\n", i, smap.map[i].e_base, smap.map[i].e_len);
 			found = 1;
@@ -57,4 +63,25 @@ void testmem() {
 
 	}
 
+}
+
+// debug - show entries from e820 map
+void parse_memmap() {
+	char* mem_type_desc[5] = {
+		"unknown",
+		"memory available to OS",
+		"reserved",
+		"ACPI reclaimable memory",
+		"ACPI NVS memory"
+		};
+
+	uint32_t i;
+
+	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.count, smap.size);
+
+	asm("cli;hlt");
+	// XXX: 32b print over 64b nrs ; should be ok for this use though..
+	for (i = 0; i < smap.count; i++) {
+		printf("%p - %p\t%s\n", (uint32_t)smap.map[i].e_base, (uint32_t)(smap.map[i].e_base + smap.map[i].e_len), mem_type_desc[smap.map[i].e_type]);
+	}
 }
