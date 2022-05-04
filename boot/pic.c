@@ -7,8 +7,6 @@
 	#include "libsa.h"
 #endif
 
-#include "mm.h"	// XXX:  testmem() from irq1 handler
-
 interrupt_desc_t idt_entries[IDT_ENTRIES];			// IDT entries
 char c;
 idt_t IDT = {	.size = sizeof(idt_entries)-1,
@@ -25,6 +23,8 @@ uint64_t irq_stats[IRQ_ENTRIES];				// IRQ stats
 // in idt.S
 extern interrupt_handler_t trap_idt_entry[TRAP_ENTRIES_LOW];	// address in IDT entry
 trap_handler_t trap_handlers[TRAP_ENTRIES_LOW];			// actual trap handler
+
+extern void show_e820map();
 
 trap_desc_t traps[TRAP_ENTRIES_LOW] = {
 		{ "Divide by zero",			0, 0 },
@@ -293,10 +293,6 @@ void irq1_handler(struct irqframe* f) {
 
 	// XXX: debugging ; this really should not be part of the irq1 handler
 	switch(scancode) {
-	// T
-	case 0x14:	testmem();
-			break;
-
 	// S
 	case 0x1f:	check_irq_stats();
 			break;
@@ -318,7 +314,7 @@ void irq1_handler(struct irqframe* f) {
 			break;
 
 	// M
-	case 0x32:	parse_memmap();
+	case 0x32:	show_e820map();
 			break;
 
 	}
