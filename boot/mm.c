@@ -79,7 +79,6 @@ void parse_memmap() {
 
 	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.count, smap.size);
 
-	asm("cli;hlt");
 	// XXX: 32b print over 64b nrs ; should be ok for this use though..
 	for (i = 0; i < smap.count; i++) {
 		printf("%p - %p\t%s\n", (uint32_t)smap.map[i].e_base, (uint32_t)(smap.map[i].e_base + smap.map[i].e_len), mem_type_desc[smap.map[i].e_type]);
