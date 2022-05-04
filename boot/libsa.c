@@ -6,8 +6,6 @@
 #include "libsa.h"
 #include "cons.h"
 
-extern struct memory_map smap;
-
 uint32_t printf(char* fmt, ...) { 
 
 	va_list ap;
