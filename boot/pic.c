@@ -281,7 +281,8 @@ void init_idt() {
 	#endif	
 }
 
-void irq0_handler(struct irqframe* f) {
+// XXX: this is just dummy handler ; frame is not used here
+void irq0_handler(__attribute__ ((unused)) struct irqframe* f) {
 	ticks++;
 	//asm("cli;hlt");
 	send_8259_EOI(0);
