@@ -247,7 +247,7 @@ _start:
 	leaw (err_drv_param), %si
 	jmp .Lprint_err
 
-.Lexterr:					/* BIOS doesn't support extented read commands. */
+.Lexterr:					/* BIOS doesn't support extended read commands. */
 	leaw (err_noext), %si
 	jmp .Lprint_err
 
