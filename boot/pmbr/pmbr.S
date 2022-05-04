@@ -210,7 +210,7 @@ _start:
 	ja .Lprep_out 	
 
 	addw (sector_size), %di
-	jno .Lload_rest
+	jnc .Lload_rest
 	
 .Ladjst_segment:
 	addw $0x1000, %ax
