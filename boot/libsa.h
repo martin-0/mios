@@ -36,6 +36,8 @@ typedef struct long_t {
 } __attribute__((packed)) long_t;
 
 
+#define LAST_CHAR(s)            ( *((s)+1) == '\0' )
+
 uint32_t printf(char* fmt, ...);
 void helper_printf_x(uint32_t nr, char lz, char ofst);
 void helper_printf_x16(uint16_t nr, char lz, char ofst);
