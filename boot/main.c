@@ -5,20 +5,23 @@
 */
 
 #include <stdint.h>
+#include <stdarg.h>
 
 #include "libsa.h"
 #include "pic.h"
+#include "mm.h"
 
 extern uint64_t ticks;
 
 void gboot_main() {
-	uint64_t old;
-	//asm("cli;hlt");
-	debug_status_8259("gboot_main");
-
 	printf("welcome to gboot_main\n");
 
-	old = ticks;
+	show_e820map();
+	init_pm();
+
+	asm("cli;hlt");
+
+	//old = ticks;
 	for (;; ) {
 		asm ("hlt");
 		/*
