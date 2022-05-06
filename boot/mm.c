@@ -42,10 +42,10 @@ void init_pm() {
 	for (i = 0; i < smap.count; i++) {
 		cur = &smap.map[i];
 
-		// free memory
+		// available memory only
 		if (smap.map[i].e_type != E820_TYPE_AVAIL) continue;
 
-		// if the size of the free memory is not more than a PAGE_SIZE we can't use it
+		// if the size of the available memory is not more than a PAGE_SIZE we can't use it
 		if ( (cur->e_len / PAGE_SIZE) == 0 ) continue;
 
 		// skip everything under 1MB
