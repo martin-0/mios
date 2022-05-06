@@ -7,7 +7,6 @@
 #include "cons.h"
 
 uint32_t printf(char* fmt, ...) { 
-
 	va_list ap;
 	
 	long_t lnr;
@@ -26,7 +25,7 @@ uint32_t printf(char* fmt, ...) {
 				// advance fmt and check what we have
 				switch(*(++fmt)) {
 				case 'l':	// check for end of str
-						if (*(fmt+1) == '\0') {
+						if ( LAST_CHAR(fmt) ) {
 							putc('l');
 							break;
 						}
@@ -215,4 +214,3 @@ void dump_memory(uint32_t* addr, uint32_t size) {
 	}
 	putc('\n');
 }
-
