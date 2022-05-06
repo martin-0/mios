@@ -34,10 +34,11 @@ typedef struct e820_map {
 */
 
 // index 0 - 31 refers to physical map 0 - 4294967296
-
 typedef uint32_t block_t;
+typedef uint32_t paddr_t;						// physical address
 
 #define	MM_HIMEM_START		1048576					// memory above 1MB
+#define	MM_HIMEM_BLOCK_START	( (MM_HIMEM_START)/(PAGE_SIZE)/(sizeof(block_t)*8) )
 #define	PAGE_SIZE		4096
 
 #define	BLOCK_SIZE		( (PAGE_SIZE)*sizeof(block_t)*8 )
@@ -51,8 +52,8 @@ typedef struct physical_map {
 
 void init_pm();
 void show_e820map();
-
-
+void* alloc_page_pm();
+void free_page_pm(void* addr);
 
 #define PTE_PER_TABLE		1024
 typedef uint32_t pte_t;

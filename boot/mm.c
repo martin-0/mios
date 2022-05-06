@@ -27,14 +27,14 @@ void init_pm() {
 		printf("init_pm: smap: %p, entries: %d\n", &smap, smap.count);
 	#endif
 
-	uint32_t i,block,bitpos;
+	uint32_t i,idx,bitpos;
 	uint32_t base,end;
 
 	e820_entry_t* cur;
 
 	// disable all memory first
-	for (i =0 ; i < MM_MAX_BLOCKS; i++) {
-		pm.block_map[i] = -1;
+	for (idx = 0 ; idx < MM_MAX_BLOCKS; idx++) {
+		pm.block_map[idx] = -1;
 	}
 	pm.blocks = 0;
 	pm.pages = 0;
@@ -57,11 +57,13 @@ void init_pm() {
 		end = ( cur->e_base + cur->e_len ) & ~(PAGE_SIZE-1);
 
 		// map starts < 1MB but there is at least one page above 1MB; adjust the base
-		if (cur->e_base + cur->e_len - MM_HIMEM_START > PAGE_SIZE ) base = MM_HIMEM_START;
-		else continue;
+		if ( cur->e_base < MM_HIMEM_START) {
+			if ( cur->e_base + cur->e_len - MM_HIMEM_START > PAGE_SIZE ) base = MM_HIMEM_START;
+			else continue;
+		}
 
 		#ifdef DEBUG_PM
-			printf("init_pm: adjusted map:\t0x%x - 0x%x, len: 0x%x, pages: %d\n", base, end, end-base, (end-base)/PAGE_SIZE);
+			printf("init_pm: %d: adjusted map:\t0x%x - 0x%x, len: 0x%x, pages: %d\n", i,base, end, end-base, (end-base)/PAGE_SIZE);
 		#endif
 
 		// NOTE: a bit annoying but seems practical to do it here. if we start at bitpos other than 0 we need to set blocks
@@ -69,12 +71,11 @@ void init_pm() {
 		if ((base % BLOCK_SIZE)/PAGE_SIZE) pm.blocks++;
 
 		// XXX: ISA hole: 15-16MB .. shouldn't it be reported by BIOS as reserved though ?
-
 		while (base < end) {
-			block = base / BLOCK_SIZE;				// current bitmap block
+			idx = base / BLOCK_SIZE;				// current bitmap block
 			bitpos = (base % BLOCK_SIZE)/PAGE_SIZE;			// current position
 
-			pm.block_map[block] &= ~(1 << bitpos);			// mark page as free
+			pm.block_map[idx] &= ~(1 << bitpos);			// mark page as free
 
 			base += PAGE_SIZE;
 			if (bitpos == 0) {
@@ -84,12 +85,59 @@ void init_pm() {
 
 			if (pm.blocks > MM_MAX_BLOCKS) {
 				// XXX: create panic function
-				printf("init_pm: fatal error, pm.blocks: %d\n", pm.blocks);
+				printf("init_pm: fatal error, too many blocks:  pm.blocks: %d\n", pm.blocks);
 				asm("cli;hlt");
 			}
 		}
 	}
 	printf("init_pm: valid blocks: %d, pages: %d, free memory: %d MB\n", pm.blocks, pm.pages, (pm.pages*PAGE_SIZE) >> 20);
+}
+
+// returns one page size
+void* alloc_page_pm() {
+	void* page = NULL;
+
+	uint32_t idx,bit;
+	block_t curblock;
+
+	// XXX: this will get slower with memory being more full
+	//	idea is to use this alloc to move to a better allocator with queues, etc.
+	//	but it'll do for now
+
+	for (idx = MM_HIMEM_BLOCK_START ; idx < MM_MAX_BLOCKS; idx++) {
+		if (pm.block_map[idx] == (block_t)-1) continue;				// ignore empty block
+
+		curblock = pm.block_map[idx];
+		for (bit = 0; bit < 8*sizeof(block_t); bit++) {
+			if ( (curblock & 1) == 0 ) {
+				// mark as used
+				pm.block_map[idx] |= (1 << bit);
+
+				// calculate physical address
+				page = (void*)(idx*BLOCK_SIZE + bit*PAGE_SIZE);
+
+				#ifdef DEBUG_PM
+					printf("alloc_page_pm: page: %p, idx: %d, bit %d\n", page, idx, bit);
+				#endif
+				goto out;
+			}
+			curblock >>= 1;
+		}
+	}
+	printf("alloc_page_pm: no free pages\n");
+
+out:
+	return page;
+}
+
+void free_page_pm(void* addr) {
+	uint32_t idx = (paddr_t)addr / BLOCK_SIZE;
+	uint32_t bitpos = ((paddr_t)addr % BLOCK_SIZE)/PAGE_SIZE;
+
+	#ifdef DEBUG_PM
+		printf("free_page_pm: address: %p, block: %d, bitpos: %d\n", (paddr_t)addr, idx, bitpos);
+	#endif
+	pm.block_map[idx] &= ~(1 << bitpos);
 }
 
 void show_e820map() {
@@ -99,7 +147,7 @@ void show_e820map() {
 	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.count, smap.entry_size);
 
 	for (i = 0; i < smap.count; i++) {
-		printf("0x%llx - 0x%llx\t%s\n", smap.map[i].e_base, smap.map[i].e_base + smap.map[i].e_len, e820_mem_types[smap.map[i].e_type]);
+		printf("%d: 0x%llx - 0x%llx\t%s\n", i,smap.map[i].e_base, smap.map[i].e_base + smap.map[i].e_len, e820_mem_types[smap.map[i].e_type]);
 		if (smap.map[i].e_type == E820_TYPE_AVAIL) usable += smap.map[i].e_len;
 	}
 	usable >>= 20;
