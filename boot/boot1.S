@@ -18,7 +18,7 @@ _start:
 	movw %ax, %fs
 	movw %ax, %gs
 
-	movb %dl, (bootdrive)			/* XXX: will I need this ? */
+	movb %dl, (bootdrive)
 	leaw (msg_boot1), %si
 	call puts16
 
