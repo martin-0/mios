@@ -202,9 +202,6 @@ void dump_memory(uint32_t* addr, uint32_t size) {
 	// round up chunks
 	chunks = ( size + sizeof(uint32_t)-1 ) / sizeof(uint32_t);	
 
-	clrscr();
-	printf("addr: %p, size: %x, chunks: %d\n", addr, size, chunks);
-
 	printf("%p", cur_addr);
 	for(i =0; i < chunks; i++) {
 		printf("\t%p", *cur_addr++);
