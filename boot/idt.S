@@ -138,11 +138,16 @@ trap_dispatch:
 		regs32
 	*/
 
+
 	pushl %esp				// trapframe
 	leal (trap_handlers), %ebx		// trap_handlers[]
-        movl 0x30(%esp), %esi                   /* trapno saved on stack */
+        movl 0x2c(%esp), %esi                   /* trapno saved on stack */
 	call *(%ebx,%esi,4)
 	popl %esi				/* stack cleanup */
+
+	/* XXX: let's treat all traps 0-31 as fatal for now  */
+	cli
+	hlt
 
 	popal
 	popw %ds
