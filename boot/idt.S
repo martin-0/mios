@@ -146,6 +146,11 @@ trap_dispatch:
 	popl %esi				/* stack cleanup */
 
 	/* XXX: let's treat all traps 0-31 as fatal for now  */
+
+	pushl $(halted)
+	call printf
+	addl $4, %esp
+
 	cli
 	hlt
 
@@ -229,3 +234,5 @@ trap_bad_dummy:
 			.long start_trap0, start_trap1, start_trap2, start_trap3, start_trap4, start_trap5, start_trap6, start_trap7, start_trap8, start_trap9, start_trap10, start_trap11
 			.long start_trap12, start_trap13, start_trap14, start_trap15, start_trap16, start_trap17, start_trap18, start_trap19, start_trap20, start_trap21
 			.long start_trap22, start_trap23, start_trap24, start_trap25, start_trap26, start_trap27, start_trap28, start_trap29, start_trap30, start_trap31
+
+	halted: .asciz "System halted.\n"
