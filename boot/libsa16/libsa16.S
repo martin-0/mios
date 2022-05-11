@@ -1,7 +1,6 @@
 /* martin */
-/* cdecl:  scratch registers: ax cx dx */
 
-// XXX: all arguments should be passed on stack then ..
+/* ABI: cdecl: args on stack, scratch registers: ax cx dx */
 
 .section .text
 	.code16
@@ -13,12 +12,16 @@
  * -============================-
 */
 
-/* DS:SI	zero terminated string to print */
+/* void puts16(char* ptr) */
 .global puts16
 .func puts16
 puts16:
-	push %si
-	push %bx
+	pushw %si
+	pushw %bx
+	pushw %bp
+	movw %sp, %bp
+	movw 8(%bp),%si
+
         xorw %bx, %bx
 0:
         lodsb
@@ -29,23 +32,22 @@ puts16:
         int $0x10
         jmp 0b
 1:
-	pop %bx
-        pop %si
+	popw %bp
+	popw %bx
+        popw %si
         ret
 .endfunc
 
-/* DS:SI	zero terminated string to print
- * stack	arguments to print, if any
- *
- * restores all registers
- */
+
+/* void printf16(char* fmt, ...) */
 .global printf16
 .func printf16
 printf16:
 	pusha				/* save them all */
 	movw %sp, %bp			/* local vars can be addressed using bp (ss segment) */
 	subw $2, %sp			/* reserve space for variable(s) */
-	leaw 0x12(%bp), %di		/* ss:di points to arguments ; 0x10(pusha), 0x02 (near call) */	
+	movw 0x12(%bp), %si		/* si = string to print */
+	leaw 0x14(%bp), %di		/* di = points to arguments ; 0x10(pusha), 0x02 (near call), 0x02 - fmt */
 	cld
 
 .Lbigloop:
@@ -239,6 +241,8 @@ printf16:
 
 .endfunc
 
+
+/* void detect_low_mem() */
 .global detect_low_mem
 .func detect_low_mem
 detect_low_mem:
@@ -250,11 +254,15 @@ detect_low_mem:
 	ret
 .endfunc
 
-/* ES:DI string */
+
+/* int16_t strlen16(char* str) */
 .global strlen16
 .func strlen16
 strlen16:
 	push %di
+	push %bp
+	movw %sp, %bp
+	movw 6(%bp), %di		/* str */
 
 	xor %ax,%ax			/* scasb compares against al */
 	xor %cx,%cx			/* set the counter to 0xffff */
@@ -265,20 +273,27 @@ strlen16:
 					/* cx got decremented once more when 0 byte was tested */
 	not %cx				/* we can compensate for that by doing 1's complement */
 	xchg %cx, %ax
+
+	pop %bp
 	pop %di
 	ret
 .endfunc
 
-/*
- * DS:SI - s1
- * ES:DI - s2
- */
+
+/* int16_t strcmp16(char* s1, char* s2) */
 .global strcmp16
 .func strcmp16
 strcmp16:
 	push %si
 	push %di
-	call strlen16			/* determine the size of the s2 string */
+	push %bp
+	movw %sp, %bp
+
+	movw 8(%bp), %si
+	movw 10(%bp), %di
+
+	pushw %si
+	call strlen16			/* determine the size of the s1 string */
 	mov %ax, %cx			/* set the loop count ; acts as strncmp from now on */
 	xor %ax, %ax
 
@@ -293,15 +308,15 @@ strcmp16:
 2:
 	lodsb				/* load ds:si into al */
 	subb %es:(%di), %al		/* al is 0 if bytes are the same */
+
+	addw $2, %sp
+	pop %bp
 	pop %di
 	pop %si
 	ret
 .endfunc
 
-/* str and dst need to be within current ds/es segment */
-/* XXX: shouldn't we make it far ptr then ?
- *
-* strncmp(char* src, char* dst, int len) */
+/* int16_t strncmp(char* src, char* dst, int16_t len) */
 .global strncmp16
 .func strncmp16
 strncmp16:
@@ -725,6 +740,45 @@ dump_regs:
 	ret
 .endfunc
 
+/* -============================-
+ *                              *
+ *	basic I/O functions	*
+ *				*
+ * -============================-
+*/
+
+/* read(int16_t disk, char* buf, int64_t start_lba, int16_t count) */
+.global read16
+.func read16
+read16:
+	pushw %si
+	pushw %bp
+	movw %sp, %bp
+
+	leaw (lba_dap), %si			/* reference for dap */
+
+	movb 6(%bp), %dl			/* disk drive */
+	movw 8(%bp), %ax
+	movw %ax, 4(%si)			/* address 0:buf */
+
+	/* break down 8B nr into 2 dwords */
+	movl 10(%bp), %eax
+	movl %eax, 8(%si)
+	movl 14(%bp), %eax
+	movl %eax, 12(%si)			/* start LBA */
+
+	movw 18(%bp), %ax
+	movw %ax, 2(%si)			/* LBAs to read */
+
+	movw $0x4200, %ax
+	int $0x13
+
+	movb %ah, (errno16)
+	popw %bp
+	popw %si
+	retw
+.endfunc
+
 .section .data
 	dbg_regs:	
 		.ascii	"Register dump:\r\n"
@@ -761,3 +815,15 @@ dump_regs:
 		.long 0, 0				/* entries ; entry size */
 	smap_data:	
 		.zero 1536				/* actual data, 24*64 = 1536 */
+
+	.align 8
+        lba_dap:
+                .byte 0x10                      /* size of the packet */
+                .byte 0                         /* reserved */
+                .word 1                         /* blocks to read */
+                .word 0,0			/* adress to read into */
+                .quad 1,0                       /* LBA */
+
+
+	.global errno16
+	errno16:	.word 0
