@@ -109,7 +109,7 @@ _start:
 	int $0x13
 	jc .Lexterr
 
-	movw 0x18(%di), %ax			/* save the sector size */
+	movw 0x18(%si), %ax			/* save the sector size */
 	movw %ax, (sector_size)
 
 	call do_read				/* read the LBA 1:  GPT header */
