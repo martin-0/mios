@@ -19,7 +19,7 @@ void gboot_main() {
 	show_e820map();
 	init_pm();
 
-	asm("cli;hlt");
+//	asm ("int $0x14");
 
 	//old = ticks;
 	for (;; ) {

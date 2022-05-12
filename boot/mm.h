@@ -34,12 +34,12 @@ typedef struct e820_map {
 */
 
 // index 0 - 31 refers to physical map 0 - 4294967296
-typedef uint32_t block_t;
+typedef uint32_t block_t;						// bitmap - keeps status of 32 pages
 typedef uint32_t paddr_t;						// physical address
 
 #define	MM_HIMEM_START		1048576					// memory above 1MB
-#define	MM_HIMEM_BLOCK_START	( (MM_HIMEM_START)/(PAGE_SIZE)/(sizeof(block_t)*8) )
 #define	PAGE_SIZE		4096
+#define	MM_HIMEM_BLOCK_START	( (MM_HIMEM_START)/(PAGE_SIZE)/(sizeof(block_t)*8) )
 
 #define	BLOCK_SIZE		( (PAGE_SIZE)*sizeof(block_t)*8 )
 #define	MM_MAX_BLOCKS		32768					// 4GB RAM = 4194304*1024 / PAGE_SIZE / sizeof(block_t)
@@ -49,6 +49,7 @@ typedef struct physical_map {
 	uint32_t	blocks;						// how many blocks do we use
 	uint32_t	pages;						// how many usable pages do we have (could be more than blocks*32)
 } physical_map_t;
+
 
 void init_pm();
 void show_e820map();
