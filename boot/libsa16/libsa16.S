@@ -2,6 +2,8 @@
 
 /* ABI: cdecl: args on stack, scratch registers: ax cx dx */
 
+	.set TABSPACE,	4
+
 .section .text
 	.code16
 
@@ -56,8 +58,28 @@ printf16:
 	je .Lendprintf
 
 	cmp $0x25, %al			/* test for % char */
+	je .Lfmt
+
+.Ltab:
+	cmp $0x09, %al			/* handle tabs */
 	jne .Lputc
 
+	// t = TABSPACE - (cursx % TABSPACE);
+	movw $0x450, %bx		/* BDA: cursor position */
+	movw $TABSPACE, %cx		/* cx = TABSPACE */
+	xor %dx, %dx
+	movzxb (%bx), %ax		/* ax = current x pos */
+	div %cx
+	subw %dx, %cx			/* how many space to we need to print */
+
+.Ltab_print:
+	movw $0x0e20,%ax
+        int $0x10
+	loop .Ltab_print
+
+	jmp .Lbigloop
+
+.Lfmt:
 	/* 
 	 *  Known formats:
 	 *	%	- actual %
@@ -416,9 +438,9 @@ A20check16:
 		pushw %ds		// +2
 
 		movw 8(%bp), %ds	/* load the ds back to what is was saved */
-		leaw (dbg_a20_test), %si
+		pushw $((dbg_a20_test))
 		call printf16
-		addw $12, %sp
+		addw $14, %sp
 		pop %ax		// ret val
 
 		pop %bp
@@ -710,7 +732,7 @@ init16_8259:
 .func dump_regs
 dump_regs:
 	/* dumping all regs first to get as much accurate state as possible */
-
+	pushw %ds			/* save in case of i'm using different ds */
 	pusha				/* +16: ax, cx, dx, bx, orig sp, bp, si, di */
 	pushw %gs
 	pushw %fs
@@ -732,11 +754,15 @@ dump_regs:
 	pushw 28(%bp)			/* cx */
 	pushw 30(%bp)			/* ax */
 
-	leaw (dbg_regs), %si
+	xorw %ax,%ax			/* ds=0 required for printing */
+	movw %ax, %ds
+	pushw $(dbg_regs)
 	call printf16
 
-	addw $32, %sp			/* roll back the stack; we don't care about flags */
+	/* while I do have ds saved on stack it's faster just to push-pop */
+	addw $34, %sp			/* roll back the stack; we don't care about flags */
 	popa				/* restore orig registers */
+	pop %ds				/* restore ds */
 	ret
 .endfunc
 
@@ -774,14 +800,72 @@ read16:
 	int $0x13
 
 	movb %ah, (errno16)
+	setc %al
+
 	popw %bp
 	popw %si
 	retw
 .endfunc
 
+/* int16_t disk_sector_size(char* buf, int16_t disk, char eddver)
+ * return: ax: 0 = failed, errno set, otherwise sector size
+ *
+ * NOTE: first byte of buffer requires to have its size set
+ *	http://www.ctyme.com/intr/rb-0715.htm
+ *	001Ah for v1.x, 001Eh for v2.x, 42h for v3.0
+*/
+.global disk_sector_size
+.func disk_sector_size
+disk_sector_size:
+	push %si
+	push %bp
+	movw %sp, %bp
+
+	movw 6(%bp), %si			/* buf */
+	movw 8(%bp), %dx			/* disk */
+	movb 10(%bp), %al			/* eddver */
+
+	cmpb $3, %al
+	jne .Ltry2
+	movw $0x42, %ax
+	jmp .Ldo48
+
+.Ltry2:
+	cmpb $2, %al
+	jne .Ltry1
+	movw $0x1e, %ax
+	jmp .Ldo48
+
+.Ltry1:
+	cmpb $1, %al
+	jne .Lerr_param
+	movw $0x1a, %ax
+
+.Ldo48:
+	movw %ax, (%si)				/* set buffer size */
+	movw $0x4800, %ax
+	int $0x13				/* AH=48H, int 0x13: get drive parameters */
+
+	movb %ah, (errno16)
+	jc .Ldss_end_err
+
+	movw 0x18(%si), %ax			/* bytes per sector */
+	jmp .Ldss_end
+
+.Lerr_param:
+	movb $0x51, (errno16)			/* custom value not defined in disk op status */
+.Ldss_end_err:
+	xor %ax, %ax
+.Ldss_end:
+	pop %bp
+	pop %si
+	ret
+.endfunc
+
 .section .data
-	dbg_regs:	
-		.ascii	"Register dump:\r\n"
+	/* dump without tabs */
+	dbg_regs_notabs:
+		.ascii	"--------\r\n"
 		.ascii	"ax:        0x%x\r\n"
 		.ascii	"cx:        0x%x\r\n"
 		.ascii	"dx:        0x%x\r\n"
@@ -791,13 +875,25 @@ read16:
 		.ascii	"si:        0x%x\r\n"
 		.ascii	"di:        0x%x\r\n"
 		.ascii	"ip:        0x%x\r\n"
-		.ascii	"eflags:    0x%x\r\n"
+		.ascii	"flags:     0x%x\r\n"
 		.ascii	"cs:        0x%x\r\n"
 		.ascii	"ss:        0x%x\r\n"
 		.ascii	"ds:        0x%x\r\n"
 		.ascii	"es:        0x%x\r\n"
 		.ascii	"fs:        0x%x\r\n"
-		.asciz	"gs:        0x%x\r\n"
+		.ascii	"gs:        0x%x\r\n"
+		.asciz	"--DUMP--\r\n"
+
+	/* dump with tabs */
+	dbg_regs:
+		.ascii	"--DUMP--\r\n"
+		.ascii	"ax: 0x%p\tcx: 0x%p\tdx: 0x%p\tbx: 0x%p\r\n"
+		.ascii	"sp: 0x%p\tbp: 0x%p\tsi: 0x%p\tdi: 0x%p\r\n"
+		.ascii	"ip: 0x%p\tflags: 0x%p\r\n"
+		.ascii	"cs: 0x%p\tss: 0x%p\tds: 0x%p\tes: 0x%p\r\n"
+		.ascii	"fs: 0x%p\tgs: 0x%p\r\n"
+		.asciz	"--DUMP--\r\n"
+
 
 	e820_err_entries:	.asciz	"Too many memory entries (64+) detected!\r\nMemory map is not complete.\r\n"
 
@@ -826,4 +922,4 @@ read16:
 
 
 	.global errno16
-	errno16:	.word 0
+	errno16:	.byte 0
