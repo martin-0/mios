@@ -123,12 +123,12 @@ _start:
 	xor %di, %di				/* signature starts at 0 */
 	repe cmpsw				/* compare ds:si es:di */
 
-	test %cx, %cx
+	test %cx, %cx				/* if all is OK es:di points to revision now */
 	jnz .Lerr_gpthdr
 
 	/* parse the partition entries */
 	movw %es:72(%di), %cx			/* cx = partition entries */
-	movw %es:72(%di), %bx			/* bx = size of the partition entry */
+	movw %es:76(%di), %bx			/* bx = size of the partition entry */
 
 	/*
 	 * Is there a reason to assert bx < sector size ? If anything sector size should be 
@@ -165,7 +165,8 @@ _start:
 	loop .Lread_entries			/* end of the buffer, read the next sector */
 
 	/* we didn't find anything */
-	jmp .Lhalt
+	leaw (err_nopart), %si
+	jmp .Lprint_err
 
 .Lpartition_found:
 	/*
@@ -241,10 +242,6 @@ _start:
 
 .Lreaderr:					/* disk read error */
 	leaw (err_generic), %si
-	jmp .Lprint_err
-
-.Ldrv_param_err:				/* error during drive param checks */
-	leaw (err_drv_param), %si
 	jmp .Lprint_err
 
 .Lexterr:					/* BIOS doesn't support extended read commands. */
@@ -324,6 +321,7 @@ puts16:
 	err_noext2:	.asciz	"! DrvParm"
 	err_partial:	.ascii	"Partial "
 	err_generic:	.asciz	"read error."
+	err_nopart:	.asciz	"! Pa"
 	err_halted:	.asciz	"\r\nHalted.\r\n"
 
 	/* MBR partitions start here */
