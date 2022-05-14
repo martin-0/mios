@@ -70,13 +70,12 @@ printf16:
 	xor %dx, %dx
 	movzxb (%bx), %ax		/* ax = current x pos */
 	div %cx
-	subw %dx, %cx			/* how many space to we need to print */
+	subw %dx, %cx			/* how many spaces do we need to print */
 
 .Ltab_print:
 	movw $0x0e20,%ax
         int $0x10
 	loop .Ltab_print
-
 	jmp .Lbigloop
 
 .Lfmt:
@@ -97,7 +96,6 @@ printf16:
 	je .Lputc
 
 	/* Check for known formats. %di moves up after each successfull FMT handling */
-
 .Lfmt_s:
 	cmp $0x73, %al			/* %s */
 	jne .Lfmt_Xx			/* next fmt */
@@ -377,6 +375,30 @@ strncmp16:
 	pop %di
 	pop %si
 	ret
+.endfunc
+
+
+/* memcmp16(char* s1, char* s2, uint16_t n) */
+.global memcmp16
+.func memcmp16
+memcmp16:
+        pushw %bp
+	pushw %di
+	pushw %si
+        movw %sp,%bp
+
+        movw 8(%bp),%si
+        movw 10(%bp),%di
+	movw 12(%bp),%cx
+
+        repe cmpsb
+	test %cx,%cx
+	setne %al
+
+	pop %si
+	pop %di
+        pop %bp
+        ret
 .endfunc
 
 /* -====================================-
@@ -732,7 +754,7 @@ init16_8259:
 .func dump_regs
 dump_regs:
 	/* dumping all regs first to get as much accurate state as possible */
-	pushw %ds			/* save in case of i'm using different ds */
+	pushw %ds
 	pusha				/* +16: ax, cx, dx, bx, orig sp, bp, si, di */
 	pushw %gs
 	pushw %fs
@@ -773,7 +795,7 @@ dump_regs:
  * -============================-
 */
 
-/* read(int16_t disk, char* buf, int64_t start_lba, int16_t count) */
+/* read16(int16_t disk, struct lba_dap_t* dap) */
 .global read16
 .func read16
 read16:
@@ -781,21 +803,8 @@ read16:
 	pushw %bp
 	movw %sp, %bp
 
-	leaw (lba_dap), %si			/* reference for dap */
-
 	movb 6(%bp), %dl			/* disk drive */
-	movw 8(%bp), %ax
-	movw %ax, 4(%si)			/* address 0:buf */
-
-	/* break down 8B nr into 2 dwords */
-	movl 10(%bp), %eax
-	movl %eax, 8(%si)
-	movl 14(%bp), %eax
-	movl %eax, 12(%si)			/* start LBA */
-
-	movw 18(%bp), %ax
-	movw %ax, 2(%si)			/* LBAs to read */
-
+	movw 8(%bp), %si			/* dap */
 	movw $0x4200, %ax
 	int $0x13
 
@@ -911,15 +920,6 @@ disk_sector_size:
 		.long 0, 0				/* entries ; entry size */
 	smap_data:	
 		.zero 1536				/* actual data, 24*64 = 1536 */
-
-	.align 8
-        lba_dap:
-                .byte 0x10                      /* size of the packet */
-                .byte 0                         /* reserved */
-                .word 1                         /* blocks to read */
-                .word 0,0			/* adress to read into */
-                .quad 1,0                       /* LBA */
-
 
 	.global errno16
 	errno16:	.byte 0
