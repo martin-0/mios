@@ -48,7 +48,7 @@ _start:
 
 	/* Get the system memory map from BIOS */
 .Lgetmem:
-	// XXX: I should more ways of detecting memory, starts with E820 and go down
+	// XXX: I should have more ways of detecting memory, starts with E820 and go down
 	//	to older stuff
 	pushw $(smap)				/* detect memory with E820 */
 	call getmem_E820
@@ -390,7 +390,7 @@ do_read:
 		.if DEBUG_VERBOSE > 1
 		pushw 2(%bx)
 
-		pushw 8(%bx)			/* we are printing it as BE, or RTL */
+		pushw 8(%bx)			/* we are printing it as BE, or LTR */
 		pushw 10(%bx)
 		pushw 12(%bx)
 		pushw 14(%bx)
