@@ -322,8 +322,8 @@ strcmp16:
 	test %cx, %cx			/* we finished looking through the string */
 	jz 2f
 	
-	dec %si				/* return si back */
-	dec %di
+	dec %si				/* rollback si back */
+	dec %di				/* rollback di back */
 
 2:
 	lodsb				/* load ds:si into al */
@@ -382,23 +382,32 @@ strncmp16:
 .global memcmp16
 .func memcmp16
 memcmp16:
-        pushw %bp
+	pushw %bp
 	pushw %di
 	pushw %si
-        movw %sp,%bp
+	movw %sp,%bp
 
-        movw 8(%bp),%si
-        movw 10(%bp),%di
+	movw 8(%bp),%si
+	movw 10(%bp),%di
 	movw 12(%bp),%cx
 
-        repe cmpsb
-	test %cx,%cx
-	setne %al
+	xor %ax,%ax				/* prepare the return value */
 
+	repe cmpsb
+	test %cx,%cx
+	jz .Lmemcmp_end
+
+	dec %si					/* rollback both si and di */
+	dec %di
+
+	lodsb					/* load ds:si */
+	subb %es:(%di), %al			/* sub es:di from it */
+
+.Lmemcmp_end:
 	pop %si
 	pop %di
-        pop %bp
-        ret
+	pop %bp
+	ret
 .endfunc
 
 /* -====================================-
@@ -909,17 +918,6 @@ disk_sector_size:
 	.ifdef DEBUG_A20
 		dbg_a20_test:	.asciz	"%p:%p    0x%x\r\n%p:%p    0x%x\r\nax: 0x%x\r\n"
 	.endif
-
-	/* smap entry is:
-		.quad base, length
-		.long type, xattr (acpi 3)
-	*/
-	.align 8
-	.globl smap, smap_data
-	smap:
-		.long 0, 0				/* entries ; entry size */
-	smap_data:	
-		.zero 1536				/* actual data, 24*64 = 1536 */
 
 	.global errno16
 	errno16:	.byte 0
