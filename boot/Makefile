@@ -14,7 +14,8 @@ OBJDIR=../obj
 
 LINKADDR=0x7c00
 
-ASFLAGS=--defsym LINKADDR=$(LINKADDR)
+ASFLAGS=--defsym LINKADDR=$(LINKADDR) --defsym DEBUG_VERBOSE=2
+#ASFLAGS=--defsym LINKADDR=$(LINKADDR)
 
 # used for debugging
 #LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N -M
