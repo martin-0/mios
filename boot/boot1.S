@@ -1,6 +1,6 @@
 /* martin */
 	.set BUFADDR, 0x3000
-	.set BUFSZ, 0x1000
+	.set BUFSZ, 0x1000			/* how many bytes I've allocated to a buffer */
 	.set STACK_OFFST, 0x4ffc
 
 .section .text
@@ -132,7 +132,7 @@ _start:
 
 	xorl %edx,%edx
 	movzxw (sector_size), %ecx
-	movzxw (bufsize), %eax
+	movl $BUFSZ, %eax			/* use BUFSZ first */
 	div %ecx				/* sectors in buffer */
 	movw %ax, (sectors_in_buf)
 	mul %ecx
@@ -530,7 +530,7 @@ panic16:
 
 	boot_partition:		.quad 0,0		/* start-end LBA of the boot partition */
 
-	bufsize:			.word BUFSZ
+	bufsize:			.word 0		/* actual buffer size, adjusted to hold n sector-size blocks */
 
 	/* GPT hdr vars */
 	gpt_partition_entry_lba:	.quad 0
