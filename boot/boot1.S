@@ -302,7 +302,7 @@ _start:
 	movw $BUFADDR, %di
 
 	cmpw $EXT2_MAGIC, 0x38(%di)
-	jne .Lext2magic_ok
+	je .Lext2magic_ok
 
 	movw $(ext2_badmagic), %ax
 	call puts16
