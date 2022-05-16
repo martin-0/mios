@@ -33,9 +33,8 @@ _start:
 
 	movw %dx, (bootdrive)			/* save bootdrive */
 
-	pushw $(msg_boot1)
+	movw $(msg_boot1), %ax
 	call puts16
-	popw %ax				/* stack cleanup */
 
 	/* Attempt to enable the A20 gate */
 	call enable_A20
@@ -50,20 +49,20 @@ _start:
 .Lgetmem:
 	// XXX: I should have more ways of detecting memory, starts with E820 and go down
 	//	to older stuff
-	pushw $(smap)				/* detect memory with E820 */
+	movw $(smap), %ax			/* detect memory with E820 */
 	call getmem_E820
 	test %ax, %ax
 	jz .Ldisk_ssize
 
-	pushw $(msg_mem_err)
+	movw $(msg_mem_err), %ax
 	call puts16
 	jmp panic16
 
 .Ldisk_ssize:
 	/* get the disk sector size */
-	pushw $1
-	pushw (bootdrive)
-	pushw $BUFADDR
+	movw $1, %cx
+	movw (bootdrive), %dx
+	movw $BUFADDR, %ax
 	call disk_sector_size			/* disk_sector_size(char* buf, int16_t disk, char eddver) */
 	test %ax,%ax
 	jnz .Lssize_check2
@@ -83,7 +82,6 @@ _start:
 
 .Lread_gpthdr:
 	/* read the GPT header */
-	addw $6, %sp				/* cleanup after disk_sector_size() */
 	movw %ax, (sector_size)			/* store for later */
 
 	xorl %ebx, %ebx
@@ -92,19 +90,18 @@ _start:
 	movl %ebx, (dap_start)			/* set lower 32b to 1 */
 	movw %bx, (dap_blocks)			/* reading one LBA */
 	movw $BUFADDR,(dap_buf)			/* into BUFADDR */
-	call do_read
+	call do_read				/* do_read() */
 
         /* verify GPT signature */
-	pushw $8
-	pushw $(gpt_hdr_signature)
-	pushw $BUFADDR
+	movw $8, %cx
+	movw $(gpt_hdr_signature), %dx
+	movw $BUFADDR, %ax
 	call memcmp16				/* memcmp16(BUFADDR, gpt_hdr_signature, 8) */
-	addw $6, %sp
 
 	test %ax,%ax
         jz .Lread_part
 
-	pushw $(fatal_gpt_sig)			/* panic if GPT header signature is not OK */
+	movw $(fatal_gpt_sig),%ax		/* panic if GPT header signature is not OK */
 	call puts16				/* XXX: place for improvement? try the backup one */
 	jmp panic16
 
@@ -147,7 +144,7 @@ _start:
 	test %ax,%ax				/* we need to be able to hold at least one partition */
 	jnz .Lread_part.1
 
-	pushw $(fatal_bufsz2)
+	movw $(fatal_bufsz2), %ax
 	call puts16
 	jmp panic16
 
@@ -202,13 +199,12 @@ _start:
 		pop %cx
 	.endif
 
-	pushw %cx				/* save the current counter */
-	call do_read				/* read the disk */
+	xchg %cx, %bp				/* save cx */
+	call do_read				/* do_read() */
 
-	pushw (part_in_buf)
+	movw (part_in_buf), %ax
 	call search_uuid_buf			/* search for the uuid */
-	addw $2, %sp
-	pop %cx					/* restore the counter */
+	xchg %bp, %cx				/* restore cx */
 
 	test %ax,%ax
 	jnz .Lfound_part
@@ -216,6 +212,7 @@ _start:
 	.ifdef DEBUG_VERBOSE
 		mov %si, %di
 	.endif
+
 	movzxw (sectors_in_buf), %eax		/* prepare for next read */
 	addl %eax, (dap_start)			/* start LBA is 64b, advance by sectors_in_buf */
 	adcl $0, (dap_start+4)
@@ -223,9 +220,8 @@ _start:
 
 .Ldo_leftovers:
 	.ifdef DEBUG_VERBOSE
-		pushw $(dbgmsg_doleftovers)
-		call printf16
-		pop %ax
+		movw $(dbgmsg_doleftovers), %ax
+		call puts16
 	.endif
 
 	movzxw (leftovers), %ecx		/* if we don't have any leftovers */
@@ -243,6 +239,7 @@ _start:
 
 .Ldo_leftovers.1:
 	.ifdef DEBUG_VERBOSE
+		pushw %ax
 		pushw %cx
 
 		pushw (sector_size)
@@ -258,6 +255,7 @@ _start:
 		call printf16
 		addw $14, %sp
 		pop %cx
+		pop %ax
 	.endif
 
 	/* buffer and start LBA were set before rounds were done. If we did rounds start LBA is pointing to */
@@ -265,7 +263,7 @@ _start:
 	movw %ax, (dap_blocks)
 	call do_read
 
-	pushw (leftovers)
+	movw (leftovers), %ax
 	call search_uuid_buf
 
 	test %ax, %ax
@@ -287,7 +285,7 @@ _start:
 	hlt
 
 .Lnopart:
-	pushw $(fatal_nopart)
+	movw $(fatal_nopart), %ax
 	call puts16
 	jmp panic16
 
@@ -338,26 +336,26 @@ off:
 	hlt
 	jmp off
 
-/* search for partition uuid in the cache; returns ptr to the partition header if found, NULL otherwise */
-/* void* bufsearch(int16_t n) */
+/* void* bufsearch(int16_t n)
+ *
+ * search for partition uuid in the cache; returns ptr to the partition header if found, NULL otherwise
+*/
 .func search_uuid_buf
 search_uuid_buf:
-	pushw %bp
 	pushw %si
-	movw %sp, %bp
+	pushw %di
 
-	movw 6(%bp), %cx
+	movw %ax, %cx				/* n */
 	movw $BUFADDR, %si			/* si = start of the partition header */
 
 .Lsearch:
-	pushw %cx
+	movw %cx, %di				/* save cx */
 
-	pushw $16
-	pushw $(linux_ext2_uuid)
-	pushw %si
+	movw $16, %cx
+	movw $(linux_ext2_uuid), %dx
+	movw %si, %ax
 	call memcmp16				/* memcmp16(partuuid, linux_ext2_uuid, 16) */
-	addw $6, %sp
-	pop %cx
+	movw %di, %cx				/* restore cx */
 
 	test %ax, %ax				/* partition found */
 	jz .Lfound
@@ -373,21 +371,22 @@ search_uuid_buf:
 	movw %si, %ax
 
 .Lsdone:
-	popw %si
-	popw %bp
+	pop %di
+	pop %si
 	ret
 .endfunc
 
 
-/* wrapper func to read16, uses bootdrive,dap defined here in boot1.S. read failure means panic */
-/* do_read() */
+/* do_read()
+ *
+ * wrapper func to read16, uses bootdrive,dap defined here in boot1.S. read failure means panic
+*/
 .func do_read
 do_read:
-	pushw %bx
-
-	leaw (lba_dap), %bx
 	.ifdef DEBUG_VERBOSE			/* verbose logging only */
 		.if DEBUG_VERBOSE > 1
+		push %bx
+		leaw (lba_dap), %bx
 		pushw 2(%bx)
 
 		pushw 8(%bx)			/* we are printing it as BE, or LTR */
@@ -399,11 +398,12 @@ do_read:
 		pushw $(dbgmsg_doread_stats)
 		call printf16
 		addw $14, %sp
+		pop %bx
 		.endif
 	.endif
 
-	pushw %bx
-	pushw (bootdrive)
+	leaw (lba_dap), %dx
+	movw (bootdrive), %ax
 	call read16				/* read16(int16_t disk, struct lba_dap* dap) */
 
 	test %ax,%ax
@@ -415,8 +415,6 @@ do_read:
 	jmp panic16
 
 .Lend_do_read:
-	addw $4, %sp
-	pop %bx	
 	ret	
 .endfunc
 
@@ -545,7 +543,7 @@ panic16:
 	fatal_gpt_sig:	.asciz	"GPT signature verification failed.\r\n"
 	fatal_bufsz:	.asciz	"Buffer too small (%d), sector size: %d\r\n"
 	fatal_bufsz2:	.asciz	"Buffer too small, unable to cache partition data.\r\n"
-	fatal_nopart:	.asciz	"Failed to find Linux partition, aborting.\r\n"
+	fatal_nopart:	.asciz	"Failed to find MIOS partition, aborting.\r\n"
 	msg_bios_err:	.asciz	"BIOS function failed, error code: %x\r\n"
 	msg_mem_err:	.asciz	"Failed to get memory map from BIOS.\r\n"
 
@@ -560,3 +558,4 @@ panic16:
 		dbgmsg_leftovers_stats:	.asciz	"%d leftovers need %d %d-sectors to read\r\n"
 	.endif
 
+	deb1:	.asciz	"this is string: %s, this is dec: %d, this is hex: %x, string: %s, hex: %x\r\n"
