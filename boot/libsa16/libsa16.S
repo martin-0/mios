@@ -1,6 +1,7 @@
 /* martin */
 
 /* ABI: cdecl: args on stack, scratch registers: ax cx dx */
+/* ABI: regparm=3: ax,dx,cx ; variadic function still uses stack */
 
 	.set TABSPACE,	4
 
@@ -20,28 +21,28 @@
 puts16:
 	pushw %si
 	pushw %bx
-	pushw %bp
-	movw %sp, %bp
-	movw 8(%bp),%si
 
         xorw %bx, %bx
+	movw %ax, %si			/* ds:si  string to print */
 0:
         lodsb
         testb %al, %al
         je 1f
 
-        mov $0x0e, %ah
+        mov $0x0e, %ah			/* int 0x10, AH=0Eh: teletype output */
         int $0x10
         jmp 0b
 1:
-	popw %bp
 	popw %bx
         popw %si
         ret
 .endfunc
 
 
-/* void printf16(char* fmt, ...) */
+/* void printf16(char* fmt, ...)
+ *
+ * variadic function overwrites regparm(3) attribute
+*/
 .global printf16
 .func printf16
 printf16:
@@ -100,11 +101,8 @@ printf16:
 	cmp $0x73, %al			/* %s */
 	jne .Lfmt_Xx			/* next fmt */
 
-	movw %si, %cx			/* save si in cx */
-	movw %ss:(%di), %si		/* bp:di points to current arg, ds:ax*/
+	movw %ss:(%di), %ax		/* bp:di points to current arg, ds:ax*/
 	call puts16
-	movw %cx, %si			/* restore si */
-
 	addw $2, %di			/* advance counter */
 	jmp .Lbigloop
 	
@@ -280,9 +278,7 @@ detect_low_mem:
 .func strlen16
 strlen16:
 	push %di
-	push %bp
-	movw %sp, %bp
-	movw 6(%bp), %di		/* str */
+	movw %ax, %di			/* str */
 
 	xor %ax,%ax			/* scasb compares against al */
 	xor %cx,%cx			/* set the counter to 0xffff */
@@ -294,7 +290,6 @@ strlen16:
 	not %cx				/* we can compensate for that by doing 1's complement */
 	xchg %cx, %ax
 
-	pop %bp
 	pop %di
 	ret
 .endfunc
@@ -306,13 +301,11 @@ strlen16:
 strcmp16:
 	push %si
 	push %di
-	push %bp
-	movw %sp, %bp
 
-	movw 8(%bp), %si
-	movw 10(%bp), %di
+	movw %ax, %si
+	movw %dx, %di
 
-	pushw %si
+	/* ax still has arg1 */
 	call strlen16			/* determine the size of the s1 string */
 	mov %ax, %cx			/* set the loop count ; acts as strncmp from now on */
 	xor %ax, %ax
@@ -329,8 +322,6 @@ strcmp16:
 	lodsb				/* load ds:si into al */
 	subb %es:(%di), %al		/* al is 0 if bytes are the same */
 
-	addw $2, %sp
-	pop %bp
 	pop %di
 	pop %si
 	ret
@@ -342,13 +333,9 @@ strcmp16:
 strncmp16:
 	push %si
 	push %di
-	push %bp
-	movw %sp, %bp
 
-	movw 12(%bp), %cx
-	movw 10(%bp), %di
-	movw 8(%bp), %si
-
+	movw %ax, %si
+	movw %dx, %di				/* cx is set as 3rd argument */
 .Lcmp:
 	test %cx, %cx				/* are we done yet? */
 	jz .Lend
@@ -371,7 +358,6 @@ strncmp16:
 	lodsb
 	sub %es:(%di), %al
 	
-	pop %bp
 	pop %di
 	pop %si
 	ret
@@ -382,31 +368,26 @@ strncmp16:
 .global memcmp16
 .func memcmp16
 memcmp16:
-	pushw %bp
-	pushw %di
 	pushw %si
-	movw %sp,%bp
+	pushw %di
 
-	movw 8(%bp),%si
-	movw 10(%bp),%di
-	movw 12(%bp),%cx
+	movw %ax, %si
+	movw %dx, %di				/* cx is already set */
 
 	xor %ax,%ax				/* prepare the return value */
-
-	repe cmpsb
-	test %cx,%cx
+	repe cmpsb				/* compare cx times */
+	test %cx,%cx				/* was it the same cx times ? */
 	jz .Lmemcmp_end
 
 	dec %si					/* rollback both si and di */
-	dec %di
+	dec %di					/* so we can return expected val */
 
 	lodsb					/* load ds:si */
 	subb %es:(%di), %al			/* sub es:di from it */
 
 .Lmemcmp_end:
-	pop %si
 	pop %di
-	pop %bp
+	pop %si
 	ret
 .endfunc
 
@@ -417,9 +398,9 @@ memcmp16:
  * -====================================-
 */
 
-/* 
- * Check if A20 gate is enabled.
+/* int16_t A20check16()
  *
+ * Check if A20 gate is enabled.
  * Two memory locations - 0x600 and 0x100600 - are written into but not restored.
  * It's assumed that during the check neither of the memory locations are used.
  *
@@ -484,11 +465,11 @@ A20check16:
 	ret
 .endfunc
 
-/* 
- * Try to enable A20 gate with the BIOS call. 
+/* int16_t A20e_bios()
  *
- * return val in %ax: 0: call was successfull, non-zero error code otherwise. 
- */
+ * Try to enable A20 gate with the BIOS call.
+ * return val in %ax: 0: call was successfull, non-zero error code otherwise.
+*/
 .global A20e_bios
 .func A20e_bios
 A20e_bios:
@@ -504,11 +485,11 @@ A20e_bios:
 	ret
 .endfunc
 
-/*
- * Try to enable A20 gate with the fast port. 
+/* void A20e_fast()
  *
+ * Try to enable A20 gate with the fast port.
  * Doesn't return anything. A20 test has to be done after this. 
- */
+*/
 .global A20e_fast
 .func A20e_fast
 A20e_fast:
@@ -519,16 +500,16 @@ A20e_fast:
 	ret
 .endfunc
 
-/*
- * Try to enable A20 gate via 8042 keyboard controller. 
+/* void A20e_kbd()
  *
- */
+ * Try to enable A20 gate via 8042 keyboard controller.
+*/
 
 /*	port 0x60 read:		read input buffer
  *	port 0x60 write: 	write output buffer
  *	port 0x64 read:		read status register
  *	port 0x64 write:	send command to controller
- */
+*/
 .global A20e_kbd
 .func A20e_kbd
 A20e_kbd:
@@ -548,6 +529,9 @@ A20e_kbd:
 	ret
 .endfunc
 
+/* int16_t wait_clear_8042()
+ *
+*/
 .global wait_clear_8042
 .func wait_clear_8042
 wait_clear_8042:
@@ -591,7 +575,10 @@ wait_clear_8042:
 	ret
 .endfunc
 
-/* try all defined options to enable the A20 gate */
+/* int16_t enable_A20()
+ *
+ * try all defined options to enable the A20 gate
+*/
 .global enable_A20
 .func enable_A20
 enable_A20:
@@ -629,8 +616,9 @@ enable_A20:
  * -============================-
 */
 
-/* to be executed in real-mode on i386 computer */
+// XXX: not done yet
 /* getmem_e820( smap ) */
+/* to be executed in real-mode on i386 computer */
 .global getmem_E820
 .func getmem_E820
 getmem_E820:
@@ -691,10 +679,8 @@ getmem_E820:
 	jmp .Le820unsupported			/* handle error */
 
 .Ltoomany:					/* too many entries, log it but end as success */
-	pushw %si
-	leaw (e820_err_entries), %si
+	leaw (e820_err_entries), %ax
 	call puts16				/* warn about it but don't report error */
-	popw %si				/* not desired behavior but for this purposes it's ok */
 	xor %ax, %ax
 	jmp .LE820end
 
@@ -718,6 +704,9 @@ getmem_E820:
  * -============================-
 */
 
+// XXX: this has to be redefined in kernel after split
+
+/* void init16_8259() */
 .global init16_8259
 .func init16_8259
 init16_8259:
@@ -804,28 +793,26 @@ dump_regs:
  * -============================-
 */
 
-/* read16(int16_t disk, struct lba_dap_t* dap) */
+/* int16_t read16(int16_t disk, struct lba_dap_t* dap) */
 .global read16
 .func read16
 read16:
 	pushw %si
-	pushw %bp
-	movw %sp, %bp
 
-	movb 6(%bp), %dl			/* disk drive */
-	movw 8(%bp), %si			/* dap */
-	movw $0x4200, %ax
+	movw %dx, %si				/* dap */
+	movw %ax, %dx				/* disk drive */
+	movw $0x4200, %ax			/* int 0x13, AH=42h: extended read */
 	int $0x13
 
 	movb %ah, (errno16)
 	setc %al
 
-	popw %bp
 	popw %si
 	retw
 .endfunc
 
 /* int16_t disk_sector_size(char* buf, int16_t disk, char eddver)
+ *
  * return: ax: 0 = failed, errno set, otherwise sector size
  *
  * NOTE: first byte of buffer requires to have its size set
@@ -836,26 +823,23 @@ read16:
 .func disk_sector_size
 disk_sector_size:
 	push %si
-	push %bp
-	movw %sp, %bp
 
-	movw 6(%bp), %si			/* buf */
-	movw 8(%bp), %dx			/* disk */
-	movb 10(%bp), %al			/* eddver */
-
-	cmpb $3, %al
+	movw %ax, %si				/* buf */
+						/* dx = disk: already set */
+						/* cx = eddver: already set */
+	cmpb $3, %cl
 	jne .Ltry2
 	movw $0x42, %ax
 	jmp .Ldo48
 
 .Ltry2:
-	cmpb $2, %al
+	cmpb $2, %cl
 	jne .Ltry1
 	movw $0x1e, %ax
 	jmp .Ldo48
 
 .Ltry1:
-	cmpb $1, %al
+	cmpb $1, %cl
 	jne .Lerr_param
 	movw $0x1a, %ax
 
@@ -875,7 +859,6 @@ disk_sector_size:
 .Ldss_end_err:
 	xor %ax, %ax
 .Ldss_end:
-	pop %bp
 	pop %si
 	ret
 .endfunc
