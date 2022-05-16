@@ -810,6 +810,57 @@ dump_regs:
 	ret
 .endfunc
 
+/* void dump_mem16(void* addr, int16_t nblocks)
+ *
+ * Dump nblocks words of addr */
+.global dump_mem16
+.func dump_mem16
+dump_mem16:
+	push %si
+	push %di
+	push %bx
+
+	movw %ax, %si				/* addr */
+	movw %dx, %di				/* blocks */
+	xorw %bx, %bx				/* counter */
+
+	pushw %si
+	pushw $(dump_mem_addr)
+	call printf16
+
+.Ldump_loop:
+	lodsw
+	push %ax
+	push $(dump_mem_val)
+	call printf16
+	addw $4, %sp
+
+	inc %bx
+	cmpw %bx, %di
+	jbe .Ldumpmem_end
+
+	testw $3, %bx
+	jnz .Ldump_loop
+	pushw %si
+	pushw $(dump_mem_addrnl)
+	call printf16
+	addw $4, %sp
+
+.Ldumpmem.1:
+	jmp .Ldump_loop
+
+.Ldumpmem_end:
+	pushw %si
+	pushw $(dump_mem_addr_end)
+	call printf16
+	addw $8, %sp
+
+	pop %bx
+	pop %di
+	pop %si
+	ret
+.endfunc
+
 /* -============================-
  *                              *
  *	basic I/O functions	*
@@ -925,6 +976,11 @@ disk_sector_size:
 	.ifdef DEBUG_A20
 		dbg_a20_test:	.asciz	"%p:%p    0x%x\r\n%p:%p    0x%x\r\nax: 0x%x\r\n"
 	.endif
+
+	dump_mem_addr:		.asciz	"0x%x\t"
+	dump_mem_addrnl:	.asciz	"\r\n0x%x\t"
+	dump_mem_addr_end:	.asciz	"\r\n0x%x\r\n"
+	dump_mem_val:		.asciz	"\t%p"
 
 	.global errno16
 	errno16:	.byte 0
