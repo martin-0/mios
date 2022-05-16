@@ -3,6 +3,8 @@
 	.set BUFSZ, 0x1000			/* how many bytes I've allocated to a buffer */
 	.set STACK_OFFST, 0x4ffc
 
+	.set EXT2_MAGIC, 0xef53
+
 .section .text
 	.code16
 	.global _start
@@ -65,24 +67,32 @@ _start:
 	movw $BUFADDR, %ax
 	call disk_sector_size			/* disk_sector_size(char* buf, int16_t disk, char eddver) */
 	test %ax,%ax
-	jnz .Lssize_check2
+	jnz .Lssize_check
 
 	call print_err				/* print the error and panic */
 	jmp panic16
 
-.Lssize_check2:
-	cmpw $BUFSZ, %ax
-	jbe .Lread_gpthdr
+.Lssize_check:
 
-	pushw %ax
-	pushw $BUFSZ
-	pushw $(fatal_bufsz)			/* buffer too small, panic */
+	/* From what I've read it seems the 512 sector size is really a standard in BIOS services. Sector sizes such as 520
+	 * are problem for BIOS itself, so I was told.
+	 *
+	 * For now I'm assuming 512 sector size.
+	 */
+
+	cmpw $0x200, %ax			/* sector size: 512 */
+	je .Lread_gpthdr
+
+	pushw %ax				/* unsupported sector size */
+	pushw $(fatal_secsize)
 	call printf16
 	jmp panic16
 
+
 .Lread_gpthdr:
 	/* read the GPT header */
-	movw %ax, (sector_size)			/* store for later */
+	movw %ax, (sector_size)
+	movw $8, (sectors_in_buf)
 
 	xorl %ebx, %ebx
 	movl %ebx, (dap_start+4)		/* set upper 32b to 0 in start LBA */
@@ -122,21 +132,16 @@ _start:
 	/* Few articles mention primary partition header is most likely spread on 2-33 LBA.
 	 * UEFI standard say to follow the header. Size may be uneven. Due to this I need to
 	 * check what can I fit into my cache buffer.
+	 * I thought I'd support variable sector size but was told that with BIOS 512 is really the only practical option.
 	 *
-	 * Read is done by sectors. I need to find out:
-	 *	- how many sectors buffer has:	BUFSZ/SECTORSZ, adjust the usable size by that
-	 *	- how many partitions can buffer hold:	ADJBUFSZ/gpt_size_partition_entry
+	 * I'm assuming sector size 512 so few things should be simplier. I need to find out:
+	 *	- how many partitions can buffer hold: BUFSZ/gpt_size_partition_entry
 	 *	- how many times do I need to read the whole partition header: full rounds (full buffer) + leftovers
 	 *	- if there are leftovers I need to know how many sectors I need to read them all
 	*/
 
 	xorl %edx,%edx
-	movzxw (sector_size), %ecx
-	movl $BUFSZ, %eax			/* use BUFSZ first */
-	div %ecx				/* sectors in buffer */
-	movw %ax, (sectors_in_buf)
-	mul %ecx
-	movw %ax,(bufsize)			/* adjusted bufsize in case bufsz % sector_size != 0 */
+	movl $BUFSZ, %eax
 	movzxw (gpt_size_partition_entry), %ecx
 	div %ecx
 	movw %ax, (part_in_buf)			/* partitions buffer can hold */
@@ -144,7 +149,7 @@ _start:
 	test %ax,%ax				/* we need to be able to hold at least one partition */
 	jnz .Lread_part.1
 
-	movw $(fatal_bufsz2), %ax
+	movw $(fatal_bufsz), %ax
 	call puts16
 	jmp panic16
 
@@ -270,7 +275,7 @@ _start:
 	jz .Lnopart
 
 .Lfound_part:
-	movw %ax, %di					/* save the result into non-scratch reg */
+	movw %ax, %di					/* di - buffer where partition was found */
 
 	movw $8, %cx					/* copy start and end LBA to boot_partition */
 	leaw 0x20(%di), %dx				/* it's probably faster to copy these two locations */
@@ -285,6 +290,29 @@ _start:
 	.endif
 
 	/* Load the ext2 superblock */
+	movl (boot_partition), %eax			/* load the start LBA to lba_dap */
+	movl %eax, (dap_start)
+	movl (boot_partition+4), %eax			/* it's 64b number */
+	movl %eax, (dap_start+4)
+	addl $0x2, (dap_start)				/* add two sectors as that's the offset of the superblock */
+	adcl $0, (dap_start+4)
+	movw $1, (dap_blocks)
+	call do_read
+
+	movw $BUFADDR, %di
+
+	cmpw $EXT2_MAGIC, 0x38(%di)
+	jne .Lext2magic_ok
+
+	movw $(ext2_badmagic), %ax
+	call puts16
+
+	movw $0x20, %dx
+	movw $BUFADDR, %ax
+	call dump_mem16
+	jmp panic16
+
+.Lext2magic_ok:
 
 	//jmp .Lto_be_removed_jump_to_pm
 
@@ -441,8 +469,14 @@ print_err:
 panic16:
 	cli
 	call dump_regs
-	pushw $(fatal_error)
+
+	movw $0x10, %dx
+	movw %sp, %ax
+	call dump_mem16
+
+	movw $(fatal_error), %ax
 	call puts16
+
 .Lpanic_loop:
 	hlt
 	jmp .Lpanic_loop
@@ -547,11 +581,13 @@ panic16:
 	fatal_a20:	.asciz	"Failed to activate A20 gate, aborting.\r\n"
 	fatal_read:	.asciz	"disk read failed with error 0x%x\r\n"
 	fatal_gpt_sig:	.asciz	"GPT signature verification failed.\r\n"
-	fatal_bufsz:	.asciz	"Buffer too small (%d), sector size: %d\r\n"
-	fatal_bufsz2:	.asciz	"Buffer too small, unable to cache partition data.\r\n"
+	fatal_secsize:	.asciz	"Unsupported sector size detected: %d\r\n"
+	fatal_bufsz:	.asciz	"Buffer too small, unable to cache partition data.\r\n"
 	fatal_nopart:	.asciz	"Failed to find MIOS partition, aborting.\r\n"
 	msg_bios_err:	.asciz	"BIOS function failed, error code: %x\r\n"
 	msg_mem_err:	.asciz	"Failed to get memory map from BIOS.\r\n"
+
+	ext2_badmagic:	.asciz	"No ext2 magic signature found.\r\n"
 
 	func_debug1:	.asciz	"address: 0x%x\r\n"
 
