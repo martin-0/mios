@@ -272,12 +272,19 @@ _start:
 .Lfound_part:
 	movw %ax, %di					/* save the result into non-scratch reg */
 
+	movw $8, %cx					/* copy start and end LBA to boot_partition */
+	leaw 0x20(%di), %dx				/* it's probably faster to copy these two locations */
+	movw $(boot_partition), %ax
+	call memcpyw16
+
 	.ifdef DEBUG_VERBOSE
 		movw 0x20(%di), %ax
 		pushw %ax
 		pushw $(dbgmsg_bpart_lba)
 		call printf16
 	.endif
+
+	/* Load the ext2 superblock */
 
 	//jmp .Lto_be_removed_jump_to_pm
 
@@ -369,7 +376,6 @@ search_uuid_buf:
 
 .Lfound:
 	movw %si, %ax
-
 .Lsdone:
 	pop %di
 	pop %si
@@ -547,7 +553,7 @@ panic16:
 	msg_bios_err:	.asciz	"BIOS function failed, error code: %x\r\n"
 	msg_mem_err:	.asciz	"Failed to get memory map from BIOS.\r\n"
 
-	func_debug1:	.asciz	"address: %p\r\n"
+	func_debug1:	.asciz	"address: 0x%x\r\n"
 
 	.ifdef DEBUG_VERBOSE
 		dbgmsg_buf_info:	.asciz	"bufsize: %d sectors, %d partitions. rounds: %d, leftovers: %d\r\n"

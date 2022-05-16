@@ -364,7 +364,7 @@ strncmp16:
 .endfunc
 
 
-/* memcmp16(char* s1, char* s2, uint16_t n) */
+/* int16_t memcmp16(char* s1, char* s2, uint16_t n) */
 .global memcmp16
 .func memcmp16
 memcmp16:
@@ -390,6 +390,30 @@ memcmp16:
 	pop %si
 	ret
 .endfunc
+
+/* void memcpyw16(void *dst, void* src, uint16_t n-words)
+ *
+ * copy n words from source to destination.
+*/
+.global memcpyw16
+.func memcpyw16
+memcpyw16:
+	pushw %si
+	pushw %di
+
+	movw %ax, %di
+	movw %dx, %si				/* cx is already set */
+
+.Lmemcpyw:
+	lodsw
+	stosw
+	loop .Lmemcpyw
+
+	pop %di
+	pop %si
+	ret
+.endfunc
+
 
 /* -====================================-
  * 					*
