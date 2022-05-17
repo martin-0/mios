@@ -1,9 +1,11 @@
 /* martin */
 	.set BUFADDR, 0x3000
-	.set BUFSZ, 0x1000			/* how many bytes I've allocated to a buffer */
-	.set STACK_OFFST, 0x4ffc
+	.set BUFSZ, 0x1000
 
 	.set EXT2_MAGIC, 0xef53
+	.set EXT2_SECTOR_OFST_SBLOCK, 2			/* offset from the beginning of the ext2 FS to superblock, in 512 sectors */
+
+	.set STACK_OFFST, 0x4ffc
 
 .section .text
 	.code16
@@ -38,6 +40,11 @@ _start:
 	movw $(msg_boot1), %ax
 	call puts16
 
+	.ifdef DEBUG_VERBOSE
+		movw $(dbgmsg_verbose), %ax
+		call puts16
+	.endif
+
 	/* Attempt to enable the A20 gate */
 	call enable_A20
 	test %ax, %ax
@@ -54,46 +61,62 @@ _start:
 	movw $(smap), %ax			/* detect memory with E820 */
 	call getmem_E820
 	test %ax, %ax
-	jz .Ldisk_ssize
+	jz .Ldiskinfo
 
 	movw $(msg_mem_err), %ax
 	call puts16
 	jmp panic16
 
-.Ldisk_ssize:
-	/* get the disk sector size */
+.Ldiskinfo:
 	movw $1, %cx
 	movw (bootdrive), %dx
 	movw $BUFADDR, %ax
-	call disk_sector_size			/* disk_sector_size(char* buf, int16_t disk, char eddver) */
+	call diskinfo16				/* diskinfo16(char* buf, int16_t disk, char eddver) */
 	test %ax,%ax
-	jnz .Lssize_check
+	jnz .Ldiskinfok
 
 	call print_err				/* print the error and panic */
 	jmp panic16
 
-.Lssize_check:
-
+.Ldiskinfok:
 	/* From what I've read it seems the 512 sector size is really a standard in BIOS services. Sector sizes such as 520
-	 * are problem for BIOS itself, so I was told.
+	 * are problem for BIOS itself, at least so I was told.
 	 *
 	 * For now I'm assuming 512 sector size.
 	 */
+	movw %ax, %si
+	movw 0x18(%si), %ax
 
 	cmpw $0x200, %ax			/* sector size: 512 */
-	je .Lread_gpthdr
+	je .Lsecsizeok
 
 	pushw %ax				/* unsupported sector size */
 	pushw $(fatal_secsize)
 	call printf16
 	jmp panic16
 
+.Lsecsizeok:
+	movw %ax, (sector_size)
+	movw $8, (sectors_in_buf)		/* how many sectors can we load buffer with */
+
+	movl 0x10(%si), %eax			/* total disk LBAs */
+	movl %eax, (total_sectors)
+	movl 0x14(%si), %eax
+	movl %eax, (total_sectors+4)
+
+	.ifdef DEBUG_VERBOSE
+		pushl (total_sectors)
+		pushl (total_sectors+4)
+		pushw (sector_size)
+		pushw (bootdrive)
+		pushw $(dbgmsg_diskinfo)
+		call printf16
+		addw $14, %sp
+	.endif
 
 .Lread_gpthdr:
-	/* read the GPT header */
-	movw %ax, (sector_size)
-	movw $8, (sectors_in_buf)
 
+	/* read the GPT header */
 	xorl %ebx, %ebx
 	movl %ebx, (dap_start+4)		/* set upper 32b to 0 in start LBA */
 	inc %bx
@@ -190,7 +213,6 @@ _start:
 	movw (rounds),%cx			/* we need to read full buffer rounds times */
 	movw (sectors_in_buf), %ax		/* LBAs to read, as much as we fit into buffer  */
 	movw %ax,(dap_blocks)
-
 
 .Lrounds:
 	.ifdef DEBUG_VERBOSE
@@ -294,12 +316,12 @@ _start:
 	movl %eax, (dap_start)
 	movl (boot_partition+4), %eax			/* it's 64b number */
 	movl %eax, (dap_start+4)
-	addl $0x2, (dap_start)				/* add two sectors as that's the offset of the superblock */
+	addl $EXT2_SECTOR_OFST_SBLOCK, (dap_start)	/* add two sectors as that's the offset of the superblock */
 	adcl $0, (dap_start+4)
 	movw $1, (dap_blocks)
 	call do_read
 
-	movw $BUFADDR, %di
+	movw $BUFADDR, %di				/* di points to the superblock */
 
 	cmpw $EXT2_MAGIC, 0x38(%di)
 	je .Lext2magic_ok
@@ -323,48 +345,6 @@ _start:
 	movw $(fatal_nopart), %ax
 	call puts16
 	jmp panic16
-
-
-.Lto_be_removed_jump_to_pm:
-
-	/* TODO: remove from boot1.S, migrate to a kernel part along with anything protected-mode related */
-
-	/* prepare to jump to protected mode */
-	cli
-	lgdt (gdt_desc)
-
-	movl %cr0, %eax				/* enable protected mode */
-	orl $1, %eax
-	movl %eax, %cr0
-
-	ljmp $8, $(pmode32)			/* flush instruction cache and set the proper cs selector */
-
-	.code32
-pmode32:	
-	movl $0x10, %eax
-	movw %ax, %ds
-	movw %ax, %es
-	movw %ax, %ss
-	movw %ax, %fs
-	movw %ax, %gs
-	movl $0x7bfc, %esp			/* stack below the bootcode */
-
-	call clrscr
-
-	call init_idt				/* setup the tables */
-	lidt (IDT)
-
-	call init_8259				/* PIC and PIT */
-	call init_pit
-
-	call debug_install_irq1
-
-	sti 					/* enable interrupts */
-
-	call gboot_main
-	jmp off					/* in case of I return from gboot_main */
-
-	.code16
 
 off:
 	cli
@@ -423,10 +403,8 @@ do_read:
 		leaw (lba_dap), %bx
 		pushw 2(%bx)
 
-		pushw 8(%bx)			/* we are printing it as BE, or LTR */
-		pushw 10(%bx)
-		pushw 12(%bx)
-		pushw 14(%bx)
+		pushl 8(%bx)			/* we are printing it as BE, or LTR */
+		pushl 12(%bx)
 
 		pushw 4(%bx)
 		pushw $(dbgmsg_doread_stats)
@@ -485,63 +463,14 @@ panic16:
 
 .section .data
 
-	/* GDT table definiion */
-	.align 16
-	gdt_desc:	.word	end_gdt-gdt-1			/* size */
-			.word	gdt,0				/* linear address, ptr to gdt */
-	.align 16
-	gdt:
-		/* base:	32b value, linear address where the segment begins
-		 * limit:	20b value, maximum addressable unit, either 1B units or 4k pages 
-		 * access:	description of segment: P | DPL  | S | E | DC | RW | A
-		 * flags:	granularity, db (size flag, 1B or 4k pages), long mode flag, reserved (0)
-		 */
-		.space	8		/* NULL desc */
+	/* basic information about the boot disk */
+	.align 8
+	total_sectors:	.quad 	0		/* total disk capacity */
+	sector_size:	.word	0		/* sector size of the disk */
+	bootdrive:	.word	0		/* bootdrive as reported by BIOS */
 
-		/* %cs in kernel mode */
-		.word 0xffff		/* limit bits 0-15 */
-		.word 0			/* base 0-15 */
-		.byte 0x0		/* base 16-23 */
-		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
-		.byte 0xcf		/* RTL: flags-limit 16-19: , flags: 32b protected mode segment, page granularity */
-		.byte 0			/* base 24-31 */
-
-		/* data in kernel mode */
-		.word 0xffff		/* limit bits 0-15 */
-		.word 0			/* base 0-15 */
-		.byte 0x0		/* base 16-23 */
-		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
-		.byte 0xcf		/* RTL: flags-limit 16-19: , flags: 32b protected mode segment, page granularity */
-		.byte 0			/* base 24-31 */
-
-		/* %cs in real mode */	
-		.word 0xffff		/* limit bits 0-15 */
-		.word 0			/* base 0-15 */
-		.byte 0x0		/* base 16-23 */
-		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
-		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
-		.byte 0			/* base 24-31 */
-
-		/* data in real mode */
-		.word 0xffff		/* limit bits 0-15 */
-		.word 0			/* base 0-15 */
-		.byte 0x0		/* base 16-23 */
-		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
-		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
-		.byte 0			/* base 24-31 */
-
-
-		/* XXX: TSS segment should be defined ; I need to think of memory layout though, base should be the designated mem, limit
-		 	is sizeof(tss), at least that's what i think
-		*/
-	end_gdt:
-
-	bootdrive:	.word	0
-	sector_size:	.word	0
-
-	.align 4
-		gpt_hdr_signature:      .quad 0x5452415020494645
-		linux_ext2_uuid:	.byte 0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47, 0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4
+	gpt_hdr_signature:      .quad 0x5452415020494645
+	linux_ext2_uuid:	.byte 0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47, 0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4
 
 	.align 8
         lba_dap:
@@ -592,12 +521,12 @@ panic16:
 	func_debug1:	.asciz	"address: 0x%x\r\n"
 
 	.ifdef DEBUG_VERBOSE
+		dbgmsg_verbose:		.asciz	"verbose boot enabled.\r\n"
+		dbgmsg_diskinfo:	.asciz	"bootdisk: 0x%x, sector size: %d, total LBAs: 0x%lx%lx\r\n"
 		dbgmsg_buf_info:	.asciz	"bufsize: %d sectors, %d partitions. rounds: %d, leftovers: %d\r\n"
 		dbgmsg_part_range:	.asciz	"partition range: <%d,%d)\r\n"
-		dbgmsg_doread_stats:	.asciz	"do_read: buf: 0x%x, start lba: 0x%x%x%x%x, blocks: %d\r\n"
+		dbgmsg_doread_stats:	.asciz	"do_read: buf: 0x%x, start lba: 0x%lx%lx, blocks: %d\r\n"
 		dbgmsg_bpart_lba:	.asciz	"boot partition LBA start: 0x%x\r\n"
 		dbgmsg_doleftovers:	.asciz	"doing leftovers\r\n"
 		dbgmsg_leftovers_stats:	.asciz	"%d leftovers need %d %d-sectors to read\r\n"
 	.endif
-
-	deb1:	.asciz	"this is string: %s, this is dec: %d, this is hex: %x, string: %s, hex: %x\r\n"

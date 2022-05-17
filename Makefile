@@ -3,29 +3,15 @@ AS=/local/cross/bin/i686-elf-as
 LD=/local/cross/bin/i686-elf-ld
 
 DISK_RAW=disk00.raw
-
-INCDIR=include
-OBJDIR=obj
-
-LINKADDR=0x7c00
-
-ASFLAGS=--defsym LINKADDR=$(LINKADDR)
-
-# inspired by https://elixir.bootlin.com/linux/v4.20.17/source/arch/x86/Makefile
-REALMODE_CFLAGS:=-m16 -g -Os -Wall -Wstrict-prototypes -march=i386 -mregparm=3 \
-		-fno-strict-aliasing -fomit-frame-pointer -fno-pic \
-		-mno-mmx -mno-sse -ffreestanding -fno-stack-protector -mpreferred-stack-boundary=2
-REALMODE_CFLAGS+=-I$(INCDIR)
-
-CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra
-CFLAGS+=-I$(INCDIR)
-
 ROOTFS=/tmp/rootfs
+
+OBJDIR=obj
 
 .PHONY: tools
 all= tools mios
 
 mios:	pmbr tools
+	make -C kernel
 	make -C boot
 
 	# install pmbr

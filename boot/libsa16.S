@@ -98,7 +98,6 @@ printf16:
 	je .Lputc
 
 	/* Check for known formats. %di moves up after each successfull FMT handling */
-
 .Lfmt_lXx:
 	cmpb $0x6c, %al			/* l */
 	jne .Lfmt_s
@@ -126,7 +125,7 @@ printf16:
 .Lfmt_lX:
 	cmpb $0x58, %al			/* %lX */
 	jne .Lputc			/* if anything else print char (but not %) */
-	subw $0x20, -2(%bp)		/* tmp -= 7, adjust for A-F */
+	subw $0x20, -2(%bp)		/* tmp -= 0x20, adjust for A-F */
 	jmp .Lfmt_lx
 
 .Lfmt_s:
@@ -145,7 +144,7 @@ printf16:
 
 	cmp $0x58, %al			/* %X */
 	jne .Lfmt_p			/* next fmt */
-	subw $0x20, -2(%bp)		/* tmp -= 7, adjust for A-F */
+	subw $0x20, -2(%bp)		/* tmp -= 0x20, adjust for A-F */
 
 .Lfmt_x:
 	xorw %cx, %cx
