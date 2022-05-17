@@ -85,6 +85,7 @@ printf16:
 	 *	%	- actual %
 	 *	s	- string
 	 *	x X	- hex number
+	 *	lx lX	- print 32b number
 	 *	p	- pointer
 	 *	d	- signed integer
 	 *	u	- unsigned integer
@@ -97,6 +98,37 @@ printf16:
 	je .Lputc
 
 	/* Check for known formats. %di moves up after each successfull FMT handling */
+
+.Lfmt_lXx:
+	cmpb $0x6c, %al			/* l */
+	jne .Lfmt_s
+
+	/* only %lx or %lX are valid formats */
+	lodsb
+	movb $0x27, -2(%bp)		/* tmp = 0x27, a-f */
+	cmpb $0x78, %al			/* %lx */
+	jne .Lfmt_lX
+
+.Lfmt_lx:
+	movw %ss:2(%di), %dx		/* upper half */
+	movw -2(%bp), %ax		/* ax is non-zero value */
+	movw %ax, %cx			/* set cx with it to indicate to print leading 0s */
+	call printf16_helper_x
+
+	movw %ss:(%di), %dx		/* lower half */
+	movw -2(%bp), %ax
+	movw %ax, %cx
+	call printf16_helper_x
+
+	addw $4, %di
+	jmp .Lbigloop
+
+.Lfmt_lX:
+	cmpb $0x58, %al			/* %lX */
+	jne .Lputc			/* if anything else print char (but not %) */
+	subw $0x20, -2(%bp)		/* tmp -= 7, adjust for A-F */
+	jmp .Lfmt_lx
+
 .Lfmt_s:
 	cmp $0x73, %al			/* %s */
 	jne .Lfmt_Xx			/* next fmt */
@@ -105,55 +137,22 @@ printf16:
 	call puts16
 	addw $2, %di			/* advance counter */
 	jmp .Lbigloop
-	
 
 .Lfmt_Xx:
-	movb $0x27, -2(%bp)		/* tmp = 0x27, set for a-f */
+	movw $0x27, -2(%bp)		/* tmp = 0x27, set for a-f */
 	cmp $0x78, %al			/* %x */
-	je .Lfmt_Xx.1
+	je .Lfmt_x
 
 	cmp $0x58, %al			/* %X */
 	jne .Lfmt_p			/* next fmt */
+	subw $0x20, -2(%bp)		/* tmp -= 7, adjust for A-F */
 
-	subw $0x7, -2(%bp)		/* tmp -= 7, adjust for A-F */
-
-.Lfmt_Xx.1:
-	movw %ss:(%di), %dx		/* dx = hex number to print */
-
-	xorw %bx, %bx			/* keep track of leading 0s */
-	movw $4, %cx			/* max digits in 16b nr */
-
-.Lfmt_Xx.loop:
-	rolw $4, %dx			/* start from the MSB */
-	movb %dl, %al
-	andb $0xf, %al			
-
-	testb %bl, %bl			/* did we print something already? */
-	jnz .Lfmt_Xx.3			/* if so continue printing */
-
-	cmpb $1, %cl			/* is this the last digit already? */
-	je .Lfmt_Xx.3			/* if so print the 0 */
-
-	testb %al, %al			/* is this a leading zero ? */
-	jnz .Lfmt_Xx.2			/* no more leading 0s */
-	loop .Lfmt_Xx.loop
-
-.Lfmt_Xx.2:
-	inc %bl				/* no, it's not */
-
-.Lfmt_Xx.3:
-	cmp $0xa, %al			/* are we printing digit or a-f */
-	jb .Lfmt_Xx.4
-	addw -2(%bp), %ax		/* print char += tmp */
-
-.Lfmt_Xx.4:
-	push %bx
-	xor %bx,%bx
-	addb $0x30, %al	
-	movb $0x0e, %ah
-	int $0x10
-	pop %bx
-	loop .Lfmt_Xx.loop
+.Lfmt_x:
+	xorw %cx, %cx
+.Lfmt_x.1:
+	movw %ss:(%di), %dx
+	movw -2(%bp), %ax
+	call printf16_helper_x
 
 	addw $2, %di			/* advance counter */
 	jmp .Lbigloop
@@ -161,14 +160,9 @@ printf16:
 .Lfmt_p:
 	cmpb $0x70, %al			/* %p */	
 	jne .Lfmt_u
-
-	movb $0x27, -2(%bp)		/* lower case hex nr */
-	movw %ss:(%di), %dx		/* dx = hex number to print */
-
-	movw $4, %cx			/* max digits in 16b nr */
-	xorw %bx, %bx			/* keep track of leading 0s */
-	inc %bl				/* print leading zeros */
-	jmp .Lfmt_Xx.loop
+	xorw %cx,%cx			/* print leading 0s */
+	inc %cx
+	jmp .Lfmt_x.1			/* then treat as %x */
 
 .Lfmt_u:
 	cmpb $0x75, %al			/* %u */
@@ -257,6 +251,59 @@ printf16:
 	popa
 	ret
 
+.endfunc
+
+/* void printf16_helper_x(uint16_t islower, uint16_t nr, uint16_t lz)
+ *
+ * Intened to be called by printf16 only.
+ *	islower: print a-f or A-F, nr: number to print, lz: print leading zeros
+*/
+.func printf16_helper_x
+printf16_helper_x:
+	pushw %si
+	pushw %di
+	pushw %bx
+
+	/* dx already set to number to print */
+	movw %ax, %di			/* islower offset */
+
+	movw %cx, %si			/* leading 0s */
+	movw $4,%cx			/* max digits in 16b nr */
+
+	xor %bx,%bx			/* set for int 0x10/AH=0Eh print */
+.Lhelpx_loop:
+	rolw $4, %dx			/* start from the MSB */
+	movb %dl, %al
+	andb $0xf, %al
+
+	test %si, %si			/* did we print something already? */
+	jnz .Lhelpx.2			/* if so continue printing */
+
+	cmpb $1, %cl			/* is this the last digit already? */
+	je .Lhelpx.2			/* if so print the 0 */
+
+	testb %al, %al			/* is this a leading zero ? */
+	jnz .Lhelpx.1			/* no more leading 0s */
+	loop .Lhelpx_loop
+
+.Lhelpx.1:
+	inc %si				/* no, it's not 0 */
+
+.Lhelpx.2:
+	cmp $0xa, %al			/* are we printing digit or a-f */
+	jb .Lhelpx.3
+	addw %di, %ax			/* print char += offset */
+
+.Lhelpx.3:
+	addb $0x30, %al
+	movb $0x0e, %ah
+	int $0x10
+	loop .Lhelpx_loop
+
+	pop %bx
+	pop %di
+	pop %si
+	ret
 .endfunc
 
 
@@ -886,17 +933,17 @@ read16:
 	retw
 .endfunc
 
-/* int16_t disk_sector_size(char* buf, int16_t disk, char eddver)
+/* void* diskinfo16(char* buf, int16_t disk, char eddver)
  *
- * return: ax: 0 = failed, errno set, otherwise sector size
+ * Returns buffer filled up with the diskinfo, NULL otherwise.
  *
  * NOTE: first byte of buffer requires to have its size set
  *	http://www.ctyme.com/intr/rb-0715.htm
  *	001Ah for v1.x, 001Eh for v2.x, 42h for v3.0
 */
-.global disk_sector_size
-.func disk_sector_size
-disk_sector_size:
+.global diskinfo16
+.func diskinfo16
+diskinfo16:
 	push %si
 
 	movw %ax, %si				/* buf */
@@ -926,7 +973,7 @@ disk_sector_size:
 	movb %ah, (errno16)
 	jc .Ldss_end_err
 
-	movw 0x18(%si), %ax			/* bytes per sector */
+	movw %si, %ax				/* set ax back to buffer if all OK */
 	jmp .Ldss_end
 
 .Lerr_param:
