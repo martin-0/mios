@@ -17,7 +17,7 @@ ASFLAGS=--defsym LINKADDR=$(LINKADDR) --defsym DEBUG_VERBOSE=2
 LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N
 #LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N -M
 
-SRCO=boot1.o libsa16.o
+SRCO=boot1.o libsa16.o ext2.o
 
 .PHONY: pmbr
 all: gboot
@@ -29,6 +29,9 @@ gboot:	$(SRCO)
 # boot1 requires LINKADDR as it loads gdt which requires linear address
 boot1.o: boot1.S
 	$(AS) $(ASFLAGS) boot1.S -o $(OBJDIR)/boot1.o
+
+ext2.o: ext2.S
+	$(AS) $(ASFLAGS) ext2.S -o $(OBJDIR)/ext2.o
 
 libsa16.o: libsa16.S
 	$(AS) libsa16.S -o $(OBJDIR)/libsa16.o

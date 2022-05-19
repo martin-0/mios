@@ -11,6 +11,7 @@ SECTIONS
 	.boot1 : { 
 		boot1.o(.*)
 		libsa16.o(.*)
+		ext2.o(.*)
 	}
 
 	/* Discard common unwanted/unneeded sections */

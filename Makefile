@@ -35,6 +35,7 @@ disk:
 	sudo mkdir -p $(ROOTFS)
 	sudo mount /dev/loop0p2 $(ROOTFS)
 	sudo mkdir $(ROOTFS)/boot
+	sudo cp obj/kernel  $(ROOTFS)/boot/
 	sudo cp obj/*.o $(ROOTFS)
 	sudo umount $(ROOTFS)
 	sudo losetup -D
