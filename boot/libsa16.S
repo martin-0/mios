@@ -443,7 +443,7 @@ memcpyw16:
 	stosw
 	loop .Lmemcpyw
 
-	movx %dx, %ax				/* ret ptr to dst */
+	movw %dx, %ax				/* ret ptr to dst */
 	pop %di
 	pop %si
 	ret
@@ -502,12 +502,12 @@ strtok16:
 .Lstrtok_trim:				/* trim any delims from the start of the string */
 	lodsb
 	testb %al, %al
-	jz .Lstrtok_retnull		/* we hit and of str when parsing delims */
+	jz .Lstrtok_retnull		/* we hit end of str when parsing delims */
 
-.Lstrtok_trim.inner:			/* go through all delims to check */
+.Lstrtok_trim.inner:			/* go through all delim[] */
 	movb (%di), %dl
 	testb %dl, %dl			/* did we hit end of delim */
-	jz .Lstrtok_trim_end		/* we're done with the trimming */
+	jz .Lstrtok_trim_end		/* if yes we're done with the trimming */
 
 	cmpb (%di), %al
 	je .Lstrtok_trim		/* continue with trimming */
@@ -516,7 +516,7 @@ strtok16:
 	jmp .Lstrtok_trim.inner
 
 .Lstrtok_trim_end:
-	dec %si				/* lodsb increments automatically */
+	dec %si				/* lodsb increments si automatically */
 	movw %si,%cx			/* si has correct start of str, store it */
 
 .Lstrtok_main:
