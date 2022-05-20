@@ -306,19 +306,6 @@ printf16_helper_x:
 .endfunc
 
 
-/* void detect_low_mem() */
-.global detect_low_mem
-.func detect_low_mem
-detect_low_mem:
-	clc
-	int $0x12
-	jnc 1f				/* in case of an error */
-	xorw %ax, %ax			/* return 0B memory */
-1:
-	ret
-.endfunc
-
-
 /* int16_t strlen16(char* str) */
 .global strlen16
 .func strlen16
@@ -437,6 +424,7 @@ memcmp16:
 	ret
 .endfunc
 
+
 /* void memcpyw16(void *dst, void* src, uint16_t n-words)
  *
  * copy n words from source to destination.
@@ -455,11 +443,120 @@ memcpyw16:
 	stosw
 	loop .Lmemcpyw
 
+	movx %dx, %ax				/* ret ptr to dst */
 	pop %di
 	pop %si
 	ret
 .endfunc
 
+/* void* memset16(char* dst, uint16_t c, uint16_t n)
+ *
+*/
+.global memset16
+.func memset16
+memset16:
+	pushw %di
+
+	push %ax
+	movw %ax, %di				/* dst */
+	movw %dx, %ax				/* c */
+						/* cx is already set */
+	rep stosb
+
+	pop %ax					/* return val is dst */
+	pop %di
+	ret
+.endfunc
+
+
+/* char* strtok16(char* str, char* delim)
+ *
+*/
+.global strtok16
+.func strtok16
+strtok16:
+	pushw %si
+	pushw %di
+	pushw %bx
+
+	cld
+	test %ax,%ax			/* check if str == NULL */
+	jz .Lstrtok_loadptr
+
+	movw %ax, %si			/* si: str */
+	xor %ax, %ax
+	mov %ax, (__strtok_nextptr)	/* __strtok_nextptr = NULL */
+	jmp .Lstrtok_1
+
+.Lstrtok_loadptr:
+	movw (__strtok_nextptr), %si
+
+.Lstrtok_1:
+	test %si,%si
+	jz .Lstrtok_retnull
+
+	movw %si, %cx			/* save str */
+	movw %dx, %bx			/* save delim */
+
+	movw %dx, %di			/* load di with delim */
+.Lstrtok_trim:				/* trim any delims from the start of the string */
+	lodsb
+	testb %al, %al
+	jz .Lstrtok_retnull		/* we hit and of str when parsing delims */
+
+.Lstrtok_trim.inner:			/* go through all delims to check */
+	movb (%di), %dl
+	testb %dl, %dl			/* did we hit end of delim */
+	jz .Lstrtok_trim_end		/* we're done with the trimming */
+
+	cmpb (%di), %al
+	je .Lstrtok_trim		/* continue with trimming */
+
+	inc %di				/* next delim char */
+	jmp .Lstrtok_trim.inner
+
+.Lstrtok_trim_end:
+	dec %si				/* lodsb increments automatically */
+	movw %si,%cx			/* si has correct start of str, store it */
+
+.Lstrtok_main:
+	lodsb
+	testb %al, %al
+	jz .Lstrtok_final_done		/* end of string, we're completely done */
+
+	movw %bx, %di			/* reset di back to start of delim */
+.Lstrtok_main_inner:			/* check all delims */
+	movb (%di), %dl
+	testb %dl, %dl
+	jz .Lstrtok_main		/* end of delims, try next char in str */
+	cmpb %dl, %al
+	je .Lstrtok_main_done
+	inc %di
+	jmp .Lstrtok_main_inner
+
+.Lstrtok_main_done:
+	xor %ax, %ax
+	movw %si, (__strtok_nextptr)	/* next ptr will start in place of si+1 */
+	dec %si
+	movb %al,(%si)			/* mark the end of str where delim was */
+	movw %cx, %ax			/* return val is the orig trimmed str */
+	jmp .Lstok_end
+
+.Lstrtok_final_done:
+	xor %ax, %ax
+	movw %ax, (__strtok_nextptr)
+	movw %cx, %ax
+	jmp .Lstok_end
+
+.Lstrtok_retnull:
+	xor %ax, %ax
+
+.Lstok_end:
+	pop %bx
+	pop %di
+	pop %si
+	ret
+.endfunc
 
 /* -====================================-
  * 					*
@@ -686,7 +783,19 @@ enable_A20:
  * -============================-
 */
 
-// XXX: not done yet
+/* void detect_low_mem() */
+.global detect_low_mem
+.func detect_low_mem
+detect_low_mem:
+	clc
+	int $0x12
+	jnc 1f				/* in case of an error */
+	xorw %ax, %ax			/* return 0B memory */
+1:
+	ret
+.endfunc
+
+
 /* getmem_e820( smap ) */
 /* to be executed in real-mode on i386 computer */
 .global getmem_E820
@@ -774,13 +883,10 @@ getmem_E820:
  * -============================-
 */
 
-// XXX: this has to be redefined in kernel after split
-
 /* void init16_8259() */
 .global init16_8259
 .func init16_8259
 init16_8259:
-
 	/* ICW1 */
 	mov $0x11, %al				/* let's init PIC, use 4 W */
 	out %al, $0x20				/* PIC master */
@@ -985,6 +1091,10 @@ diskinfo16:
 .endfunc
 
 .section .data
+
+	.align 2
+	__strtok_nextptr:		.word	0	/* used for internal tracking of str with strtok16() */
+
 	/* dump without tabs */
 	dbg_regs_notabs:
 		.ascii	"--------\r\n"
@@ -1008,14 +1118,12 @@ diskinfo16:
 
 	/* dump with tabs */
 	dbg_regs:
-		.ascii	"--DUMP--\r\n"
+		.ascii	"-- regs --\r\n"
 		.ascii	"ax: 0x%p\tcx: 0x%p\tdx: 0x%p\tbx: 0x%p\r\n"
 		.ascii	"sp: 0x%p\tbp: 0x%p\tsi: 0x%p\tdi: 0x%p\r\n"
 		.ascii	"ip: 0x%p\tflags: 0x%p\r\n"
 		.ascii	"cs: 0x%p\tss: 0x%p\tds: 0x%p\tes: 0x%p\r\n"
-		.ascii	"fs: 0x%p\tgs: 0x%p\r\n"
-		.asciz	"--DUMP--\r\n"
-
+		.asciz	"fs: 0x%p\tgs: 0x%p\r\n"
 
 	e820_err_entries:	.asciz	"Too many memory entries (64+) detected!\r\nMemory map is not complete.\r\n"
 
