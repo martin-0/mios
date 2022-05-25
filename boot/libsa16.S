@@ -38,6 +38,31 @@ puts16:
         ret
 .endfunc
 
+/* void putsn16(char* ptr, uint16_t n)
+ *
+ * printf first n chars of the ptr 
+*/
+.global putsn16
+.func putsn16
+putsn16:
+	pushw %si
+	pushw %bx
+
+        xorw %bx, %bx
+	movw %ax, %si			/* ds:si  string to print */
+	movw %dx, %cx			/* n */
+0:
+        lodsb
+
+        mov $0x0e, %ah			/* int 0x10, AH=0Eh: teletype output */
+        int $0x10
+        loop 0b
+
+	popw %bx
+        popw %si
+        ret
+.endfunc
+
 
 /* void printf16(char* fmt, ...)
  *
@@ -109,10 +134,16 @@ printf16:
 	jne .Lfmt_lX
 
 .Lfmt_lx:
+	// XXX: this is all dirty hack, i should do this in better way and for decimals too
 	movw %ss:2(%di), %dx		/* upper half */
 	movw -2(%bp), %ax		/* ax is non-zero value */
-	movw %ax, %cx			/* set cx with it to indicate to print leading 0s */
+//	movw %ax, %cx			/* set cx with it to indicate to print leading 0s */
+	xorw %cx,%cx			/* don't print leading 0s */
 	call printf16_helper_x
+
+	xorw %cx,%cx
+	testw $0, %ss:2(%di)
+	cmovnz %ax, %cx			/* print leading 0s only if upper half was non-zero */
 
 	movw %ss:(%di), %dx		/* lower half */
 	movw -2(%bp), %ax
