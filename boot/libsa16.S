@@ -373,7 +373,6 @@ strcmp16:
 	call strlen16			/* determine the size of the s1 string */
 	mov %ax, %cx			/* set the loop count ; acts as strncmp from now on */
 	xor %ax, %ax
-
 1:
 	repe cmpsb
 	test %cx, %cx			/* we finished looking through the string */
@@ -400,28 +399,33 @@ strncmp16:
 
 	movw %ax, %si
 	movw %dx, %di				/* cx is set as 3rd argument */
+	test %cx,%cx				/* don't start the comparison if cx is 0 */
+	jnz .Lcmp
+	xor %ax,%ax				/* return 0 */
+	jmp .Lend
+
 .Lcmp:
 	test %cx, %cx				/* are we done yet? */
-	jz .Lend
+	jz .Lcmp_end
 
 	cmpsb					/* compare ds:si with es:di at most cx times */
-	jne .Lnotsame
+	jne .Lcmp_end
 
 	dec %si
 	lodsb					/* test if one of the string is 0 already */
 	test %al, %al
-	jz .Lend
+	jz .Lcmp_end
 	dec %cx					/* check next char */
 	jmp .Lcmp
 
-.Lnotsame:					/* cmpsb inc si/di, we need it for ret val */
+.Lcmp_end:					/* cmpsb inc si/di, we need it for ret val */
 	dec %si
 	dec %di
-.Lend:
 	xor %ax, %ax
 	lodsb
 	sub %es:(%di), %al
-	
+
+.Lend:
 	pop %di
 	pop %si
 	ret
