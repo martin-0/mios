@@ -3,3 +3,4 @@ keep/*
 *.swp
 mios
 disk00.raw
+tests/disk00*
