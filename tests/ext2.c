@@ -8,10 +8,22 @@
 PROBLEMS:
 	What happens if ext2_dir_entry->rec_len is larger than block size? can direct block pointer (DBP) step outside of the block ?
 	This is the biggest issue now. Found the FS where I can't find the block leafs to do the "old" link list traversal.
-	Indexed dir entry articles confused me a lot .. 
+
+	update: I found the mistake i was making before: inode i had cached was using the same cache as i use for any other block cache
+		I was reading bogus data. I expect that sum of rec_len within block has to end on block_size in the end. If hash dirs
+		are used I may hit the fake entry with ./.. in it (dxroot) but otherwise it has to be ok.
+		So it is safe to say no, DBP can't go outside of the block. 
+
 
 	should I stop continue if DBP in i_block[] is 0? i_blocks seems not practical
 	should I stop if I find ext2_dir_entry with valid rec_len but inode is 0?
+
+	update:	It seems I should only care for rec_len when traversing the structure (not even inode as it can be 0 when deleted)
+	
+		i_blocks var seems to be problematic though. I'm tempted to ignore it and use the following logic:
+			if i_block[] is 0 skip it but continue looking up all 12 of them
+			if indirect block (whatever level) is 0 skip it.
+
 
 	Definition of i_blocks:
 	"""
