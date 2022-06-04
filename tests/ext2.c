@@ -43,6 +43,12 @@ NOTES for asm:
 	Question is if it makes sense to cache any blocks at all. PAGE_SIZE can hold either 4, 2 or 1 block depending on the blocksize.
 	Maybe some sequentional reads can benefit from that. Will see.
 
+	doing double and tripple indirect travelsal is not that different from the single one but it introduces
+	interesting problem with the cache. yes, here it's ok just to use another bbuf to cache block data
+	and continue .. in bootloader this can be a problem as i need 3 PAGE_SIZE regions to deal with it
+	real problem? well .. not exactly .. i could use 0x1000-0x3000 physical for this. or maybe even some higher memory regions below 1MB
+
+
 */
 
 
@@ -93,6 +99,8 @@ int read_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf);
 int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr);
 int search_dir_entry_nohash(bbuf_t* bbuf, char* matchstr);
 int search_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf, char* matchstr);
+int search_dir_entry_nohash_dibp(int fd, bbuf_t* bbuf, char* matchstr);
+int search_dir_entry_nohash_tibp(int fd, bbuf_t* bbuf, char* matchstr);
 
 int main(int argc, char** argv) {
 	char* dname = (argc == 2) ? argv[1] : DISK; 
@@ -169,6 +177,11 @@ int main(int argc, char** argv) {
 	printf("kernel size: %u\n", inode.i_size);
 
 	dump_memory((int*)&inode, 128);
+
+	/// NOTE: this will be a job for elf parser
+	if ((access_block(fd, inode.i_block[0], &bbuf)) != 0) { return -1; }
+	show_bbuf(&bbuf, 128);
+
 
 out:
 	close(fd);
@@ -260,6 +273,61 @@ int search_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf, char* matchstr) {
 	return 0;
 }
 
+int search_dir_entry_nohash_dibp(int fd, bbuf_t* bbuf, char* matchstr) {
+	#ifdef DEBUG
+		printf("search_dir_entry_nohash_dibp: looking for %s\n", matchstr);
+	#endif
+
+	int* bp = (int*)bbuf->buf;
+	int ret,i,block_entries = (1024 << sb.s_log_block_size) / sizeof(int);
+
+	bbuf_t bbuf2;	// need somewhere to cache the individual entries
+
+	#ifdef DEBUG
+		printf("search_dir_entry_nohash_dibp: block entries in sibp: %d\n", block_entries);
+	#endif
+
+	for (i =0; i < block_entries, *bp != 0; i++) {
+		#ifdef DBEUG
+			printf("search_dir_entry_nohash_dibp: entry %d -> 0x%x\n", i, *bp);
+		#endif
+
+		if ((access_block(fd, *bp, &bbuf2)) != 0) { return -1; }
+		if (( ret = search_dir_entry_nohash_sibp(fd, &bbuf2, matchstr)) != 0) return ret;
+
+		bp++;
+
+	}
+	return 0;
+}
+
+int search_dir_entry_nohash_tibp(int fd, bbuf_t* bbuf, char* matchstr) {
+	#ifdef DEBUG
+		printf("search_dir_entry_nohash_tibp: looking for %s\n", matchstr);
+	#endif
+
+	int* bp = (int*)bbuf->buf;
+	int ret,i,block_entries = (1024 << sb.s_log_block_size) / sizeof(int);
+
+	bbuf_t bbuf2;	// need somewhere to cache the individual entries
+
+	#ifdef DEBUG
+		printf("search_dir_entry_nohash_tibp: block entries in sibp: %d\n", block_entries);
+	#endif
+
+	for (i =0; i < block_entries, *bp != 0; i++) {
+		#ifdef DBEUG
+			printf("search_dir_entry_nohash_tibp: entry %d -> 0x%x\n", i, *bp);
+		#endif
+
+		if ((access_block(fd, *bp, &bbuf2)) != 0) { return -1; }
+		if (( ret = search_dir_entry_nohash_dibp(fd, &bbuf2, matchstr)) != 0) return ret;
+
+		bp++;
+
+	}
+	return 0;
+}
 
 // returns inode if found, 0 otherwise
 int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr) {
@@ -293,8 +361,14 @@ int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* m
 	if ((ret = search_dir_entry_nohash_sibp(fd, bbuf, matchstr)) != 0)
 		return ret;
 
-	printf("search_dir: dibp: %x\n", inode->i_block[13]);
-	printf("search_dir: tibp: %x\n", inode->i_block[14]);
+	if ((access_block(fd, inode->i_block[13], bbuf)) != 0) { return -1; }
+	if ((ret = search_dir_entry_nohash_dibp(fd, bbuf, matchstr)) != 0)
+		return ret;
+
+	if ((access_block(fd, inode->i_block[14], bbuf)) != 0) { return -1; }
+	if ((ret = search_dir_entry_nohash_tibp(fd, bbuf, matchstr)) != 0)
+		return ret;
+
 	return 0;
 }
 
