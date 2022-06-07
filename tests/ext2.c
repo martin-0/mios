@@ -5,18 +5,26 @@
 	https://www.nongnu.org/ext2-doc/ext2.html
 	https://www.win.tue.nl/~aeb/linux/fs/ext2/ext2.html#AEN703
 
+NOTES:
+	while not ext2 specific inode size can be as big as block size. Important thing is it can't spread on more blocks.
+
 PROBLEMS:
 	i_blocks seems to be problematic. I'm tempted to ignore it and use the following logic:
-		if i_block[] is 0 skip it but continue looking up all 12 of them
+		if i_block[] is 0 skip it but continue looking up all 15 of them (0-11,12,13,14)
 		if indirect block (whatever level) is 0 skip it.
 
 	Definition of i_blocks:
 	"""
 		32-bit value representing the total number of 512-bytes blocks reserved to contain the data of this inode, regardless if
 		these blocks are used or not. The block numbers of these reserved blocks are contained in the i_block array. 
+
+		Since this value represents 512-byte blocks and not file system blocks, this value should not be directly used as an index to the i_block array.
+		Rather, the maximum index of the i_block array should be computed from i_blocks / ((1024<<s_log_block_size)/512), or once simplified, i_blocks/(2<<s_log_block_size).
 	"""
 
 	Makes my head spin. "block" is used here to describe different things. Even for inode 2 I get the value 19 which doesn't make sense.
+	Max index to i_block[] is 15 as we have DBP: 0-11, SIBP: 12, DIBP: 13, TIBP: 14
+
 
 NOTES for asm:
 	I can't use single buffer cache for this operation. I need to keep these separately:
@@ -32,6 +40,7 @@ NOTES for asm:
 	interesting problem with the cache. yes, here it's ok just to use another bbuf to cache block data
 	and continue .. in bootloader this can be a problem as i need 3 PAGE_SIZE regions to deal with it
 	real problem? well .. not exactly .. i could use 0x1000-0x3000 physical for this. or maybe even some higher memory regions below 1MB
+	or each return from a subroutine would read from a disk again - trading speed for memory usage
 
 */
 
@@ -56,22 +65,30 @@ NOTES for asm:
 #define	EXT2_OFST_SB	1024
 #define MAGIC		0xef53
 
-#define	DEBUG	1
+//#define	DEBUG	1
 
 // block buffer
 typedef struct bbuf {
+	unsigned int start_bid;	// start of the cached block id
+	unsigned int capacity;	// how many blocks can buffer hold
+	int stat_hits;		// item in cache
+	int stat_total;		// total requests
 	off_t file_ofst;	// actual offset in the file
 	char buf[BUFSZ];
 } bbuf_t;
 
 struct ext2_super_block	sb;
 struct ext2_group_desc gde;
-int blkid_gdt;
+
+int blkid_gdt;					// block id of the global group descriptor table
+int block_size;					// block size ( 1024 << sb.s_log_block_size )
+int inodes_per_block;
 
 void show_sblock();
 void show_gde(struct ext2_group_desc* gde, int hdr);
 void show_bbuf(bbuf_t* buf, int size);
 void dump_memory(int* addr, int size);
+void init_bbuf(bbuf_t* b);
 
 int access_inode(int fd, int inum, struct ext2_inode* inode);
 int access_gde(int fd, int inum, struct ext2_group_desc* gd_entry);
@@ -112,13 +129,17 @@ int main(int argc, char** argv) {
 		printf("ext2: magic signature not found\n");
 		goto out;
 	}
-	
+
+	block_size = 1024 << sb.s_log_block_size;
 	blkid_gdt = (sb.s_log_block_size == 0) ? 2 : 1;
+	inodes_per_block = block_size / sb.s_inode_size;
 
 	show_sblock();
 
 	struct ext2_inode inode;
+
 	bbuf_t bbuf;
+	init_bbuf(&bbuf);
 
 	char kernel[] = "/boot/kernel";
 	int inum;
@@ -137,12 +158,8 @@ int main(int argc, char** argv) {
 			goto out;
 		}
 
-		// XXX: how .. how is this possible ? Official statement about i_blocks: 
-		//
-		//	Since this value represents 512-byte blocks and not file system blocks, this value should not be directly used as an index to the i_block array. 
-		//	Rather, the maximum index of the i_block array should be computed from i_blocks / ((1024<<s_log_block_size)/512), or once simplified, i_blocks/(2<<s_log_block_size). 
-		//
-		printf("** inode i_blocks: %d, max index in i_block[] is %d\n", inode.i_blocks, inode.i_blocks/(2<< sb.s_log_block_size));
+		// XXX: value of i_blocks just doesn't make sense to me
+		//printf("** inode i_blocks: %d, max index in i_block[] is %d\n", inode.i_blocks, inode.i_blocks/(2<< sb.s_log_block_size));
 
 		if ((inum = search_dir(fd, inum, &inode, &bbuf, token)) == 0) {
 			printf("%s not found\n", token);
@@ -150,7 +167,6 @@ int main(int argc, char** argv) {
 		}
 
 		token = strtok(NULL, "/");
-
 	}
 
 	if ((access_inode(fd, inum, &inode)) != 0) {
@@ -178,7 +194,7 @@ int read_dir_entry_nohash(bbuf_t* bbuf) {
 	int csize = 0;
 	char tmp[256];
 
-	while (csize < 1024 << sb.s_log_block_size) {
+	while (csize < block_size) {
 		de = (struct ext2_dir_entry*)(bbuf->buf+csize);
 		snprintf(tmp, (de->name_len & 0xff)+1, "%s", de->name);
 
@@ -190,9 +206,10 @@ int read_dir_entry_nohash(bbuf_t* bbuf) {
 
 int read_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf) {
 	int* bp = (int*)bbuf->buf;
-	int i,block_entries = (1024 << sb.s_log_block_size) / sizeof(int);
+	int i,block_entries = block_size / sizeof(int);
 
-	bbuf_t bbuf2;	// need somewhere to cache the individual entries
+	bbuf_t bbuf2;		// need somewhere to cache the individual entries
+	init_bbuf(&bbuf2);
 
 	#ifdef DEBUG
 		printf("read_dir_entry_nohash_sibp: block entries in sibp: %d\n", block_entries);
@@ -219,7 +236,7 @@ int search_dir_entry_nohash(bbuf_t* bbuf, char* matchstr) {
 
 	mlen = strlen(matchstr);
 	csize = 0;
-	while (csize < 1024 << sb.s_log_block_size) {
+	while (csize < block_size) {
 		de = (struct ext2_dir_entry*)(bbuf->buf+csize);
 
 		if ( (mlen == (de->name_len & 0xff)) && (!strncmp(de->name, matchstr, mlen))) {
@@ -235,9 +252,10 @@ int search_dir_entry_nohash(bbuf_t* bbuf, char* matchstr) {
 
 int search_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf, char* matchstr) {
 	int* bp = (int*)bbuf->buf;
-	int ret,i,block_entries = (1024 << sb.s_log_block_size) / sizeof(int);
+	int ret,i,block_entries = block_size / sizeof(int);
 
 	bbuf_t bbuf2;	// need somewhere to cache the individual entries
+	init_bbuf(&bbuf2);
 
 	#ifdef DEBUG
 		printf("search_dir_entry_nohash_sibp: block entries in sibp: %d\n", block_entries);
@@ -263,9 +281,10 @@ int search_dir_entry_nohash_dibp(int fd, bbuf_t* bbuf, char* matchstr) {
 	#endif
 
 	int* bp = (int*)bbuf->buf;
-	int ret,i,block_entries = (1024 << sb.s_log_block_size) / sizeof(int);
+	int ret,i,block_entries = block_size / sizeof(int);
 
 	bbuf_t bbuf2;	// need somewhere to cache the individual entries
+	init_bbuf(&bbuf2);
 
 	#ifdef DEBUG
 		printf("search_dir_entry_nohash_dibp: block entries in sibp: %d\n", block_entries);
@@ -291,9 +310,10 @@ int search_dir_entry_nohash_tibp(int fd, bbuf_t* bbuf, char* matchstr) {
 	#endif
 
 	int* bp = (int*)bbuf->buf;
-	int ret,i,block_entries = (1024 << sb.s_log_block_size) / sizeof(int);
+	int ret,i,block_entries = block_size / sizeof(int);
 
 	bbuf_t bbuf2;	// need somewhere to cache the individual entries
+	init_bbuf(&bbuf2);
 
 	#ifdef DEBUG
 		printf("search_dir_entry_nohash_tibp: block entries in sibp: %d\n", block_entries);
@@ -327,29 +347,27 @@ int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* m
 	for (i =0 ; i < 12; i++) {
 		#ifdef DEBUG
 			printf("search_dir: inode block: 0x%x\n", inode->i_block[i]);
-
 			if (inode->i_flags & 0x1000) {
 				printf("search_dir: hash index dir\n");
 			}
 		#endif
 
 		// read the DBP
-		if ((access_block(fd, inode->i_block[i], bbuf)) != 0) { return -1; }
+		if ((access_block(fd, inode->i_block[i], bbuf)) != 0) { return 0; }
 		if ((ret = search_dir_entry_nohash(bbuf, matchstr)) != 0)
 			return ret;
-
 	}
 
 	// read the single indirect block pointer and process it
-	if ((access_block(fd, inode->i_block[12], bbuf)) != 0) { return -1; }
+	if ((access_block(fd, inode->i_block[12], bbuf)) != 0) { return 0; }
 	if ((ret = search_dir_entry_nohash_sibp(fd, bbuf, matchstr)) != 0)
 		return ret;
 
-	if ((access_block(fd, inode->i_block[13], bbuf)) != 0) { return -1; }
+	if ((access_block(fd, inode->i_block[13], bbuf)) != 0) { return 0; }
 	if ((ret = search_dir_entry_nohash_dibp(fd, bbuf, matchstr)) != 0)
 		return ret;
 
-	if ((access_block(fd, inode->i_block[14], bbuf)) != 0) { return -1; }
+	if ((access_block(fd, inode->i_block[14], bbuf)) != 0) { return 0; }
 	if ((ret = search_dir_entry_nohash_tibp(fd, bbuf, matchstr)) != 0)
 		return ret;
 
@@ -357,23 +375,22 @@ int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* m
 }
 
 int access_inode(int fd, int inum, struct ext2_inode* inode) {
-	// NOTE:	inode_table can spread on more blocks. i need to find the proper
-	//		block offset within the inode table
-	//
-	//		block_inode_capacity = block_size/inode_size
-	//		myblock = idx / block_inode_capacity
-	//
-	//		i can simplify that as ( (idx/block_size)/inode_size) = idx*inode_size/block_size
-	//
-	int block_group,idx,idx2, bix;		// bix = block idx
+	// NOTE:	inode_table can spread on more blocks. i need to find the proper block offset within the inode table
+	int block_group,idx,idx2,bix;
 
-
+	// block_group is used as index into gdt to lookup the group metadata
 	block_group = (inum-1) / sb.s_inodes_per_group;
-	idx = (inum-1) % sb.s_inodes_per_group;
-	bix = (idx * sb.s_inode_size)/((1024 << sb.s_log_block_size));
-	idx2 = idx % ((1024 << sb.s_log_block_size) / sb.s_inode_size);	//XXX: it's late now; this has to be simplified
 
-	printf("access_inode: inum %d is in block group %d, offset within block: %d,  inode index %d, rel index: %d\n", inum, block_group, bix, idx, idx2);
+	// inode position within the block group
+	idx = (inum-1) % sb.s_inodes_per_group;
+
+	// block index within the given group
+	bix = idx / inodes_per_block;
+
+	// inode index within the block
+	idx2 = idx % inodes_per_block;
+
+	printf("access_inode: inum %d is in block group %d, offset within block: %d, inode index %d, rel index: %d\n", inum, block_group, bix, idx, idx2);
 
 	// find the global descriptor entry for the inum
 	if ((access_gde(fd, block_group, &gde)) != 0) {
@@ -382,6 +399,8 @@ int access_inode(int fd, int inum, struct ext2_inode* inode) {
 	}
 
 	bbuf_t bbuf;	// NOTE: local bbuf
+	init_bbuf(&bbuf);
+
 	// find the inode_table for given group, adjust for the block index
 	if ((access_block(fd, (gde.bg_inode_table+bix), &bbuf)) != 0) { return -2; }
 
@@ -397,12 +416,12 @@ int access_block(int fd, int blkid, bbuf_t* bbf) {
 		printf("access_block: block id: %d (0x%x)\n", blkid, blkid);
 	#endif
 
-	if ( (bbf->file_ofst = lseek(fd, (LBA_START*SECSZ)+blkid*(1024 << sb.s_log_block_size), SEEK_SET)) == (off_t)-1) {
+	if ( (bbf->file_ofst = lseek(fd, (LBA_START*SECSZ)+(blkid*block_size), SEEK_SET)) == (off_t)-1) {
 		printf("access_block: blockid: %d (0x%x): lseek failed\n", blkid, blkid);
 		return -1;
 	}
 
-	if ((rb=read(fd, bbf->buf, 1024 << sb.s_log_block_size) != 1024 << sb.s_log_block_size) != rb) {
+	if ((rb=read(fd, bbf->buf, block_size) != block_size) != rb) {
 		printf("access_block: failed to read the block\n");
 		return -2;
 	}
@@ -417,7 +436,7 @@ int access_block(int fd, int blkid, bbuf_t* bbf) {
 int access_gde(int fd, int bg, struct ext2_group_desc* gd_entry) {
 	size_t rb;
 	
-	if ((lseek(fd, (LBA_START*SECSZ)+ blkid_gdt*(1024 << sb.s_log_block_size) + bg*(sizeof(struct ext2_group_desc)), SEEK_SET)) == (off_t)-1) {
+	if ((lseek(fd, (LBA_START*SECSZ)+ blkid_gdt*block_size + bg*(sizeof(struct ext2_group_desc)), SEEK_SET)) == (off_t)-1) {
 		printf("access_gde: block group: %d: failed to seek in file\n", bg);
 		return -1;
 	}
@@ -435,10 +454,22 @@ int access_gde(int fd, int bg, struct ext2_group_desc* gd_entry) {
 	return 0;
 }
 
+void init_bbuf(bbuf_t* b) {
+	memset(b, 0, sizeof(bbuf_t));
+	b->capacity = BUFSZ/block_size;
+	b->start_bid = -1;
+}
+
 void show_bbuf(bbuf_t* buf, int size) {
 	off_t faddr = buf->file_ofst;
 	int* cur_addr = (int*)buf->buf;
         int i, chunks;
+
+	printf( "start block id: %d\n"
+		"capacity: %d\n"
+		"hits: %d/%d\n", buf->start_bid, buf->capacity, buf->stat_hits, buf->stat_total);
+
+	if (!size) return;
 
         // round up chunks
         chunks = ( size + sizeof(int)-1 ) / sizeof(int);
@@ -482,11 +513,13 @@ void show_sblock() {
 		"  version: %d\n"
 		"  inodes count: 0x%x\n"
 		"  block count: 0x%x\n"
-		"  block size: 0x%x\n"
+		"  block size: 0x%x (global var: 0x%x)\n"
 		"  blocks per group: 0x%x\n"
 		"  inodes per group: 0x%x\n"
+		"  inodes per block: 0x%x\n"
 		"  inode size: 0x%x\n"
 		"  incompat feature: 0x%x\n"
 		"  block group desc table: %d\n",
-			sb.s_rev_level, sb.s_inodes_count, sb.s_blocks_count, 1024 << sb.s_log_block_size, sb.s_blocks_per_group, sb.s_inodes_per_group, sb.s_inode_size, sb.s_feature_incompat, blkid_gdt);
+			sb.s_rev_level, sb.s_inodes_count, sb.s_blocks_count, 1024 << sb.s_log_block_size, block_size, sb.s_blocks_per_group, sb.s_inodes_per_group,
+			inodes_per_block, sb.s_inode_size, sb.s_feature_incompat, blkid_gdt);
 }
