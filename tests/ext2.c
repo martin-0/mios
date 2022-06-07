@@ -1,5 +1,4 @@
-/*XXX:	had to drop and rewrite the test from scratch due to issues with hash dirs.
-
+/*
 	https://wiki.osdev.org/Ext2#Inode_Type_and_Permissions
 	http://web.mit.edu/tytso/www/linux/ext2intro.html
 	https://www.nongnu.org/ext2-doc/ext2.html
@@ -40,10 +39,10 @@ NOTES for asm:
 	interesting problem with the cache. yes, here it's ok just to use another bbuf to cache block data
 	and continue .. in bootloader this can be a problem as i need 3 PAGE_SIZE regions to deal with it
 	real problem? well .. not exactly .. i could use 0x1000-0x3000 physical for this. or maybe even some higher memory regions below 1MB
-	or each return from a subroutine would read from a disk again - trading speed for memory usage
+	or each return from a subroutine would read from a disk again - trading speed for memory usage. or i could use another buf for sidp, but double and tripple lookups
+	will suffer from speed as i would drop the cache..
 
 */
-
 
 #include <stdio.h>
 #include <stdint.h>
@@ -65,22 +64,26 @@ NOTES for asm:
 #define	EXT2_OFST_SB	1024
 #define MAGIC		0xef53
 
-//#define	DEBUG	1
+#define	DEBUG	1
+#define	DEBUG_BLOCK_CACHE	1
+
+#define	PANIC_IF_ERR	1
 
 // block buffer
 typedef struct bbuf {
-	unsigned int start_bid;	// start of the cached block id
-	unsigned int capacity;	// how many blocks can buffer hold
-	int stat_hits;		// item in cache
-	int stat_total;		// total requests
-	off_t file_ofst;	// actual offset in the file
+	unsigned int start_blkid;	// start of the cached block id
+	unsigned int capacity;		// how many blocks can buffer hold
+	int invalid;			// state of the buffer
+	int stat_hits;			// item in cache
+	int stat_total;			// total requests
+	off_t file_ofst;		// actual offset in the file
 	char buf[BUFSZ];
 } bbuf_t;
 
 struct ext2_super_block	sb;
 struct ext2_group_desc gde;
 
-int blkid_gdt;					// block id of the global group descriptor table
+unsigned int blkid_gdt;				// block id of the global group descriptor table
 int block_size;					// block size ( 1024 << sb.s_log_block_size )
 int inodes_per_block;
 
@@ -92,16 +95,13 @@ void init_bbuf(bbuf_t* b);
 
 int access_inode(int fd, int inum, struct ext2_inode* inode);
 int access_gde(int fd, int inum, struct ext2_group_desc* gd_entry);
-int access_block(int fd, int blkid, bbuf_t* bbf);
-
-int read_dir_entry_nohash(bbuf_t* bbuf);
-int read_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf);
+char* access_block(int fd, unsigned int blkid, bbuf_t* bbf);
 
 int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr);
-int search_dir_entry_nohash(bbuf_t* bbuf, char* matchstr);
-int search_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf, char* matchstr);
-int search_dir_entry_nohash_dibp(int fd, bbuf_t* bbuf, char* matchstr);
-int search_dir_entry_nohash_tibp(int fd, bbuf_t* bbuf, char* matchstr);
+int search_dir_entry_nohash(char* buf, char* matchstr);
+int search_dir_entry_nohash_sibp(int fd, char* buf, char* matchstr);
+int search_dir_entry_nohash_dibp(int fd, char* buf, char* matchstr);
+int search_dir_entry_nohash_tibp(int fd, char* buf, char* matchstr);
 
 int main(int argc, char** argv) {
 	char* dname = (argc == 2) ? argv[1] : DISK; 
@@ -164,6 +164,8 @@ int main(int argc, char** argv) {
 		if ((inum = search_dir(fd, inum, &inode, &bbuf, token)) == 0) {
 			printf("%s not found\n", token);
 			goto out;
+		} else {
+			printf("%s has inode %d\n", token, inum);
 		}
 
 		token = strtok(NULL, "/");
@@ -179,7 +181,7 @@ int main(int argc, char** argv) {
 	dump_memory((int*)&inode, 128);
 
 	/// NOTE: this will be a job for elf parser
-	if ((access_block(fd, inode.i_block[0], &bbuf)) != 0) { return -1; }
+	if ((access_block(fd, inode.i_block[0], &bbuf)) == NULL) { return -1; }
 	show_bbuf(&bbuf, 128);
 
 
@@ -188,56 +190,139 @@ out:
 	return 0;
 }
 
-// read the dir entry node
-int read_dir_entry_nohash(bbuf_t* bbuf) {
-	struct ext2_dir_entry* de;
-	int csize = 0;
-	char tmp[256];
+int search_dir_entry_nohash_tibp(int fd, char* buf, char* matchstr) {
+	#ifdef DEBUG
+		printf("search_dir_entry_nohash_tibp: looking for %s\n", matchstr);
+	#endif
 
-	while (csize < block_size) {
-		de = (struct ext2_dir_entry*)(bbuf->buf+csize);
-		snprintf(tmp, (de->name_len & 0xff)+1, "%s", de->name);
+	char* bufloc;
+	int* bp = (int*)buf;
+	int ret,i,block_entries = block_size / sizeof(int);
 
-		printf("%d -> %s\n", de->inode, tmp);
-		csize += de->rec_len;
-	}
-	return 0;
-}
-
-int read_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf) {
-	int* bp = (int*)bbuf->buf;
-	int i,block_entries = block_size / sizeof(int);
-
-	bbuf_t bbuf2;		// need somewhere to cache the individual entries
+	bbuf_t bbuf2;	// need somewhere to cache the individual entries
 	init_bbuf(&bbuf2);
 
 	#ifdef DEBUG
-		printf("read_dir_entry_nohash_sibp: block entries in sibp: %d\n", block_entries);
+		printf("search_dir_entry_nohash_tibp: block entries in sibp: %d\n", block_entries);
 	#endif
 
-	for (i =0; i < block_entries, *bp != 0; i++) {
+	for (i =0; i < block_entries;  i++) {
 		#ifdef DBEUG
-			printf("read_dir_entry_nohash_sibp: entry %d -> 0x%x\n", i, *bp);
+			printf("search_dir_entry_nohash_tibp: entry %d/%d -> 0x%x\n", i, block_entries, *bp);
 		#endif
 
-		if ((access_block(fd, *bp, &bbuf2)) != 0) { return -1; }
-		read_dir_entry_nohash(&bbuf2);
+		// skip over 0
+		if (*bp == 0) continue;
+
+		if ((bufloc = access_block(fd, *bp, &bbuf2)) == NULL) { return 0; }
+		if (( ret = search_dir_entry_nohash_dibp(fd, bufloc, matchstr)) != 0) return ret;
+
 		bp++;
 
 	}
+
+	#ifdef DEBUG_BLOCK_CACHE
+		show_bbuf(&bbuf2, 0);
+	#endif
 	return 0;
 }
 
-// read the directory entry, don't bother with the htree
+int search_dir_entry_nohash_dibp(int fd, char* buf, char* matchstr) {
+	#ifdef DEBUG
+		printf("search_dir_entry_nohash_dibp: looking for %s\n", matchstr);
+	#endif
+
+	char* bufloc;
+	int* bp = (int*)buf;
+	int ret,i,block_entries = block_size / sizeof(int);
+
+	bbuf_t bbuf2;	// need somewhere to cache the individual entries
+	init_bbuf(&bbuf2);
+
+	#ifdef DEBUG
+		printf("search_dir_entry_nohash_dibp: block entries in sibp: %d\n", block_entries);
+	#endif
+
+	for (i =0; i < block_entries; i++) {
+		#ifdef DBEUG
+			printf("search_dir_entry_nohash_dibp: entry %d/%d -> 0x%x\n", i, block_entries, *bp);
+		#endif
+
+		// skip over 0
+		if (*bp == 0) continue;
+
+		if ((bufloc = access_block(fd, *bp, &bbuf2)) == NULL) { return 0; }
+		if ( (ret=search_dir_entry_nohash_sibp(fd, bufloc, matchstr)) != 0) return ret;
+
+		bp++;
+
+	}
+
+	#ifdef DEBUG_BLOCK_CACHE
+		show_bbuf(&bbuf2, 0);
+	#endif
+	return 0;
+}
+
+int search_dir_entry_nohash_sibp(int fd, char* buf, char* matchstr) {
+	char* bufloc;
+	int* bp = (int*)buf;
+	int ret,i,block_entries;
+	bbuf_t bbuf2;	// need somewhere to cache the individual entries
+
+	block_entries = block_size / sizeof(int);
+	init_bbuf(&bbuf2);
+
+	#ifdef DEBUG
+		printf("search_dir_entry_nohash_sibp: block entries in sibp: %d\n", block_entries);
+	#endif
+
+	for (i =0; i < block_entries; i++) {
+		#ifdef DEBUG
+			printf("search_dir_entry_nohash_sibp: entry %d/%d -> 0x%x\n", i, block_entries, *bp);
+		#endif
+
+		// skip over 0
+		if (*bp == 0) continue;
+
+		if ((bufloc = access_block(fd, *bp, &bbuf2)) == NULL) { return 0; }
+		if ((ret=search_dir_entry_nohash(bufloc, matchstr)) != 0) return ret;
+
+		bp++;
+
+	}
+
+	#ifdef DEBUG_BLOCK_CACHE
+		show_bbuf(&bbuf2, 0);
+	#endif
+	return 0;
+}
+
+
+// read the directory entry, ignore htree
+// buf points to a block entry
+//
 // returns inode if found, 0 otherwise
-int search_dir_entry_nohash(bbuf_t* bbuf, char* matchstr) {
+int search_dir_entry_nohash(char* buf, char* matchstr) {
 	struct ext2_dir_entry* de;
 	int mlen,csize;
 
 	mlen = strlen(matchstr);
 	csize = 0;
 	while (csize < block_size) {
-		de = (struct ext2_dir_entry*)(bbuf->buf+csize);
+		de = (struct ext2_dir_entry*)(buf+csize);
+
+		// avoid infinite loop
+		if (de->rec_len == 0) {
+			printf("search_dir_entry_nohash: oops: rec_len is 0: %d\n", de->rec_len);
+
+			dump_memory((int*)buf, 128);
+
+			#ifdef PANIC_IF_ERR
+				_exit(42);
+			#endif
+			return 0;
+		}
 
 		if ( (mlen == (de->name_len & 0xff)) && (!strncmp(de->name, matchstr, mlen))) {
 			#ifdef DEBUG
@@ -250,95 +335,13 @@ int search_dir_entry_nohash(bbuf_t* bbuf, char* matchstr) {
 	return 0;
 }
 
-int search_dir_entry_nohash_sibp(int fd, bbuf_t* bbuf, char* matchstr) {
-	int* bp = (int*)bbuf->buf;
-	int ret,i,block_entries = block_size / sizeof(int);
-
-	bbuf_t bbuf2;	// need somewhere to cache the individual entries
-	init_bbuf(&bbuf2);
-
-	#ifdef DEBUG
-		printf("search_dir_entry_nohash_sibp: block entries in sibp: %d\n", block_entries);
-	#endif
-
-	for (i =0; i < block_entries, *bp != 0; i++) {
-		#ifdef DBEUG
-			printf("search_dir_entry_nohash_sibp: entry %d -> 0x%x\n", i, *bp);
-		#endif
-
-		if ((access_block(fd, *bp, &bbuf2)) != 0) { return -1; }
-		if (( ret = search_dir_entry_nohash(&bbuf2, matchstr)) != 0) return ret;
-
-		bp++;
-
-	}
-	return 0;
-}
-
-int search_dir_entry_nohash_dibp(int fd, bbuf_t* bbuf, char* matchstr) {
-	#ifdef DEBUG
-		printf("search_dir_entry_nohash_dibp: looking for %s\n", matchstr);
-	#endif
-
-	int* bp = (int*)bbuf->buf;
-	int ret,i,block_entries = block_size / sizeof(int);
-
-	bbuf_t bbuf2;	// need somewhere to cache the individual entries
-	init_bbuf(&bbuf2);
-
-	#ifdef DEBUG
-		printf("search_dir_entry_nohash_dibp: block entries in sibp: %d\n", block_entries);
-	#endif
-
-	for (i =0; i < block_entries, *bp != 0; i++) {
-		#ifdef DBEUG
-			printf("search_dir_entry_nohash_dibp: entry %d -> 0x%x\n", i, *bp);
-		#endif
-
-		if ((access_block(fd, *bp, &bbuf2)) != 0) { return -1; }
-		if (( ret = search_dir_entry_nohash_sibp(fd, &bbuf2, matchstr)) != 0) return ret;
-
-		bp++;
-
-	}
-	return 0;
-}
-
-int search_dir_entry_nohash_tibp(int fd, bbuf_t* bbuf, char* matchstr) {
-	#ifdef DEBUG
-		printf("search_dir_entry_nohash_tibp: looking for %s\n", matchstr);
-	#endif
-
-	int* bp = (int*)bbuf->buf;
-	int ret,i,block_entries = block_size / sizeof(int);
-
-	bbuf_t bbuf2;	// need somewhere to cache the individual entries
-	init_bbuf(&bbuf2);
-
-	#ifdef DEBUG
-		printf("search_dir_entry_nohash_tibp: block entries in sibp: %d\n", block_entries);
-	#endif
-
-	for (i =0; i < block_entries, *bp != 0; i++) {
-		#ifdef DBEUG
-			printf("search_dir_entry_nohash_tibp: entry %d -> 0x%x\n", i, *bp);
-		#endif
-
-		if ((access_block(fd, *bp, &bbuf2)) != 0) { return -1; }
-		if (( ret = search_dir_entry_nohash_dibp(fd, &bbuf2, matchstr)) != 0) return ret;
-
-		bp++;
-
-	}
-	return 0;
-}
-
-// returns inode if found, 0 otherwise
+// returns inum if found, 0 otherwise
 int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr) {
 	struct ext2_dir_entry* de;
 	int i,csize,ret;
 	char tmp[256];
 	int mlen = strlen(matchstr);
+	char* bufloc;
 
 	#ifdef DEBUG
 		printf("search_dir: looking for %s\n", matchstr);
@@ -353,27 +356,31 @@ int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* m
 		#endif
 
 		// read the DBP
-		if ((access_block(fd, inode->i_block[i], bbuf)) != 0) { return 0; }
-		if ((ret = search_dir_entry_nohash(bbuf, matchstr)) != 0)
+		if ((bufloc = access_block(fd, inode->i_block[i], bbuf)) == NULL) { return 0; }
+		if ((ret = search_dir_entry_nohash(bufloc, matchstr)) != 0)
 			return ret;
 	}
 
+	printf("search_dir: moving to indirect blocks\n");
+
 	// read the single indirect block pointer and process it
-	if ((access_block(fd, inode->i_block[12], bbuf)) != 0) { return 0; }
-	if ((ret = search_dir_entry_nohash_sibp(fd, bbuf, matchstr)) != 0)
+	if ((bufloc = access_block(fd, inode->i_block[12], bbuf)) == NULL) { return 0; }
+	if ((ret = search_dir_entry_nohash_sibp(fd, bufloc, matchstr)) != 0)
 		return ret;
 
-	if ((access_block(fd, inode->i_block[13], bbuf)) != 0) { return 0; }
-	if ((ret = search_dir_entry_nohash_dibp(fd, bbuf, matchstr)) != 0)
+	if ((bufloc = access_block(fd, inode->i_block[13], bbuf)) == NULL) { return 0; }
+	if ((ret = search_dir_entry_nohash_dibp(fd, bufloc, matchstr)) != 0)
 		return ret;
 
-	if ((access_block(fd, inode->i_block[14], bbuf)) != 0) { return 0; }
-	if ((ret = search_dir_entry_nohash_tibp(fd, bbuf, matchstr)) != 0)
+	if ((bufloc = access_block(fd, inode->i_block[14], bbuf)) == NULL) { return 0; }
+	if ((ret = search_dir_entry_nohash_tibp(fd, bufloc, matchstr)) != 0)
 		return ret;
 
 	return 0;
 }
 
+// searches for inode inum, if found inode structure is updated
+// returns 0 if all ok, err otherwise
 int access_inode(int fd, int inum, struct ext2_inode* inode) {
 	// NOTE:	inode_table can spread on more blocks. i need to find the proper block offset within the inode table
 	int block_group,idx,idx2,bix;
@@ -400,37 +407,95 @@ int access_inode(int fd, int inum, struct ext2_inode* inode) {
 
 	bbuf_t bbuf;	// NOTE: local bbuf
 	init_bbuf(&bbuf);
+	char* bufloc;
 
 	// find the inode_table for given group, adjust for the block index
-	if ((access_block(fd, (gde.bg_inode_table+bix), &bbuf)) != 0) { return -2; }
+	if ((bufloc = access_block(fd, (gde.bg_inode_table+bix), &bbuf)) == NULL) { return -2; }
 
 	// buffer holds the blocksize full of inode
-	memcpy(inode, (struct ext2_inode*)(bbuf.buf)+idx2 , sizeof(*inode));
+	memcpy(inode, (struct ext2_inode*)(bufloc)+idx2 , sizeof(*inode));
 	return 0;
 }
 
-int access_block(int fd, int blkid, bbuf_t* bbf) {
+char* access_block(int fd, unsigned int blkid, bbuf_t* bbf) {
+	unsigned int pos, adjstart;
 	size_t rb;
 
-	#ifdef DEBUG
-		printf("access_block: block id: %d (0x%x)\n", blkid, blkid);
+	#ifdef DEBUG_BLOCK_CACHE
+		printf("access_block: block id: %u (0x%x)\n", blkid, blkid);
 	#endif
 
-	if ( (bbf->file_ofst = lseek(fd, (LBA_START*SECSZ)+(blkid*block_size), SEEK_SET)) == (off_t)-1) {
-		printf("access_block: blockid: %d (0x%x): lseek failed\n", blkid, blkid);
-		return -1;
+	if (blkid > sb.s_blocks_count) {
+		printf("access_block: oops: blkid %u > %u\n", blkid, sb.s_blocks_count);
+
+		#ifdef PANIC_IF_ERR
+			_exit(42);
+		#endif
+		return NULL;
 	}
 
-	if ((rb=read(fd, bbf->buf, block_size) != block_size) != rb) {
-		printf("access_block: failed to read the block\n");
-		return -2;
+	bbf->stat_total++;
+
+	// attempt to search in cache
+	if (! bbf->invalid) {
+
+		if (blkid <  bbf->start_blkid ) goto read_disk;
+		pos = blkid - bbf->start_blkid;
+
+		if (pos >= bbf->capacity) goto read_disk;
+
+		#ifdef PANIC_IF_ERR
+			if (pos < 0 || pos >= bbf->capacity) {
+				printf("access_block: oops: position %d outside of the boundary <0,%d>\n", bbf->capacity-1);
+				_exit(42);
+			}
+		#endif
+
+		/*
+		#ifdef DEBUG_BLOCK_CACHE
+			printf("access_block: blkid %u in cache, pos %u\n", blkid, pos);
+			show_bbuf(bbf, 128);
+		#endif
+		*/
+
+		bbf->stat_hits++;
+		return bbf->buf + block_size*pos;
 	}
+
+read_disk:
+
+	if (blkid+bbf->capacity > sb.s_blocks_count) {
+		adjstart = sb.s_blocks_count - bbf->capacity;
+		printf("access_block: blockid: %u, adjstart: %u\n", blkid, adjstart);
+	} else {
+		adjstart = blkid;
+	}
+
+	if ( (bbf->file_ofst = lseek(fd, (LBA_START*SECSZ)+(adjstart*block_size), SEEK_SET)) == (off_t)-1) {
+		printf("access_block: blockid: %u (0x%x): lseek failed\n", adjstart, adjstart);
+
+		#ifdef PANIC_IF_ERR
+			_exit(42);
+		#endif
+			return NULL;
+	}
+
+	if ((rb = read(fd, bbf->buf, bbf->capacity*block_size)) != bbf->capacity*block_size) {
+		printf("access_block: failed to read blocks: start: %u\n", adjstart);
+		#ifdef PANIC_IF_ERR
+			_exit(42);
+		#endif
+		return NULL;
+	}
+
+	bbf->start_blkid = adjstart;
+	bbf->invalid = 0;
 
 	#ifdef DEBUG_ACCESS_BLOCK
 		show_bbuf(bbf, 256);
 	#endif
 
-	return 0;
+	return bbf->buf;
 }
 
 int access_gde(int fd, int bg, struct ext2_group_desc* gd_entry) {
@@ -457,7 +522,7 @@ int access_gde(int fd, int bg, struct ext2_group_desc* gd_entry) {
 void init_bbuf(bbuf_t* b) {
 	memset(b, 0, sizeof(bbuf_t));
 	b->capacity = BUFSZ/block_size;
-	b->start_bid = -1;
+	b->invalid = 1;
 }
 
 void show_bbuf(bbuf_t* buf, int size) {
@@ -467,7 +532,7 @@ void show_bbuf(bbuf_t* buf, int size) {
 
 	printf( "start block id: %d\n"
 		"capacity: %d\n"
-		"hits: %d/%d\n", buf->start_bid, buf->capacity, buf->stat_hits, buf->stat_total);
+		"hits: %d/%d\n", buf->start_blkid, buf->capacity, buf->stat_hits, buf->stat_total);
 
 	if (!size) return;
 
