@@ -1,4 +1,4 @@
-CFLAGS=-g -m32  -no-pie
+CFLAGS=-g -m32  -no-pie -Wall -Wpedantic -Wextra
 OBJDIR=../obj
 
 all: ext2

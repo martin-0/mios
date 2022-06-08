@@ -64,10 +64,10 @@ NOTES for asm:
 #define	EXT2_OFST_SB	1024
 #define MAGIC		0xef53
 
-#define	DEBUG	1
+#define	DEBUG			1
 #define	DEBUG_BLOCK_CACHE	1
 
-#define	PANIC_IF_ERR	1
+#define	PANIC_IF_ERR		1
 
 // block buffer
 typedef struct bbuf {
@@ -97,7 +97,7 @@ int access_inode(int fd, int inum, struct ext2_inode* inode);
 int access_gde(int fd, int inum, struct ext2_group_desc* gd_entry);
 char* access_block(int fd, unsigned int blkid, bbuf_t* bbf);
 
-int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr);
+int search_dir(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr);
 int search_dir_entry_nohash(char* buf, char* matchstr);
 int search_dir_entry_nohash_sibp(int fd, char* buf, char* matchstr);
 int search_dir_entry_nohash_dibp(int fd, char* buf, char* matchstr);
@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
 		goto out;
 	}
 
-	if ((rb = read(fd, &sb, sizeof(sb))) != rb) {
+	if ((rb = read(fd, &sb, sizeof(sb))) != sizeof(sb) ) {
 		printf("failed to read the superblock\n");
 		goto out;
 	}
@@ -144,28 +144,47 @@ int main(int argc, char** argv) {
 	char kernel[] = "/boot/kernel";
 	int inum;
 
-	inum = 2;
 	char *token = strtok(kernel, "/");
 
+	inum = 2;
+	if ((access_inode(fd, inum, &inode)) != 0) {
+		printf("failed to access inode %d\n", inum);
+		goto out;
+	}
+
+	if (! (inode.i_mode & 0x4000) ) {
+		printf("oops: root inode %d is not a directory\n", inum);
+		goto out;
+	}
+
 	while(token != NULL) {
+
+		//printf("** inode i_blocks: %d, max index in i_block[] is %d\n", inode.i_blocks, inode.i_blocks/(2<< sb.s_log_block_size));
+
+		if ((inum = search_dir(fd, &inode, &bbuf, token)) == 0) {
+			printf("%s not found\n", token);
+			goto out;
+		} else {
+			printf("%s is in inode %d\n", token, inum);
+		}
+
 		if ((access_inode(fd, inum, &inode)) != 0) {
 			printf("failed to access inode %d\n", inum);
 			goto out;
 		}
+		dump_memory((int*)&inode, 128);
 
-		if (! inode.i_mode & 0x4000) {
-			printf("inum %d is not a dir\n", inum);
-			goto out;
-		}
+		// XXX: handle symlink .. but what igf it points to anoter symlink, and so on .. 
+		if (inode.i_mode & 0xA000) {
+			if (inode.i_size > 60) {
+				printf("symlink: inum %d is in block: %d\n", inum, inode.i_block[0]);
+			} else {
+				printf("symlink: inum %d is symlink: %s\n", inum, (char*)&inode.i_block[0]);
+				token = (char*)&inode.i_block[0];
 
-		// XXX: value of i_blocks just doesn't make sense to me
-		//printf("** inode i_blocks: %d, max index in i_block[] is %d\n", inode.i_blocks, inode.i_blocks/(2<< sb.s_log_block_size));
+				
 
-		if ((inum = search_dir(fd, inum, &inode, &bbuf, token)) == 0) {
-			printf("%s not found\n", token);
-			goto out;
-		} else {
-			printf("%s has inode %d\n", token, inum);
+			}
 		}
 
 		token = strtok(NULL, "/");
@@ -336,12 +355,9 @@ int search_dir_entry_nohash(char* buf, char* matchstr) {
 }
 
 // returns inum if found, 0 otherwise
-int search_dir(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr) {
-	struct ext2_dir_entry* de;
-	int i,csize,ret;
-	char tmp[256];
-	int mlen = strlen(matchstr);
+int search_dir(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr) {
 	char* bufloc;
+	int i,ret;
 
 	#ifdef DEBUG
 		printf("search_dir: looking for %s\n", matchstr);
@@ -445,8 +461,8 @@ char* access_block(int fd, unsigned int blkid, bbuf_t* bbf) {
 		if (pos >= bbf->capacity) goto read_disk;
 
 		#ifdef PANIC_IF_ERR
-			if (pos < 0 || pos >= bbf->capacity) {
-				printf("access_block: oops: position %d outside of the boundary <0,%d>\n", bbf->capacity-1);
+			if (pos >= bbf->capacity) {
+				printf("access_block: oops: position %d outside of the boundary <0,%d>\n", pos, bbf->capacity-1);
 				_exit(42);
 			}
 		#endif
@@ -506,7 +522,7 @@ int access_gde(int fd, int bg, struct ext2_group_desc* gd_entry) {
 		return -1;
 	}
 
-	if ((rb = read(fd, gd_entry, sizeof(struct ext2_group_desc))) != rb) {
+	if ((rb = read(fd, gd_entry, sizeof(struct ext2_group_desc))) != sizeof(struct ext2_group_desc)) {
 		printf("access_gde: block group: %d: read failed\n", bg);
 		return -2;
 	}
@@ -539,11 +555,11 @@ void show_bbuf(bbuf_t* buf, int size) {
         // round up chunks
         chunks = ( size + sizeof(int)-1 ) / sizeof(int);
 
-        printf("0x%.08x", faddr);
+        printf("0x%.08lx", faddr);
         for(i =0, faddr+=sizeof(int) ; i < chunks; i++, faddr+=sizeof(int)) {
                 printf("\t0x%.08x", *cur_addr++);
                 if ((i+1)%4 == 0) {
-                        printf("\n0x%.08x", faddr);
+                        printf("\n0x%.08lx", faddr);
                 }
         }
         puts("\n");
@@ -556,10 +572,10 @@ void dump_memory(int* addr, int size) {
 	// round up chunks
 	chunks = ( size + sizeof(int)-1 ) / sizeof(int);
 
-	printf("%p", cur_addr);
+	printf("%p", (void*)cur_addr);
 	for(i =0; i < chunks; i++) {
 		printf("\t0x%.08x", *cur_addr++);
-		if ((i+1)%4 == 0) { printf("\n%p", cur_addr); }
+		if ((i+1)%4 == 0) { printf("\n%p", (void*)cur_addr); }
 	}
 	puts("\n");
 }
