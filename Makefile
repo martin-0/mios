@@ -31,12 +31,21 @@ disk:
 	dd if=/dev/zero of=$(DISK_RAW) bs=1024k count=256
 	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:A501 -n 2:4096:266239 -t 2:8300 ./disk00.raw
 	sudo losetup -P /dev/loop0 ./disk00.raw
-	sudo mkfs.ext2 /dev/loop0p2
+	sudo mkfs.ext2 -b 4096 /dev/loop0p2
 	sudo mkdir -p $(ROOTFS)
 	sudo mount /dev/loop0p2 $(ROOTFS)
 	sudo mkdir $(ROOTFS)/boot
 	sudo cp obj/kernel  $(ROOTFS)/boot/
 	sudo cp obj/*.o $(ROOTFS)
+	sudo umount $(ROOTFS)
+	sudo losetup -D
+
+disk-mount:
+	sudo losetup -P /dev/loop0 ./disk00.raw
+	sudo mkdir -p $(ROOTFS)
+	sudo mount /dev/loop0p2 $(ROOTFS)
+
+disk-umount:
 	sudo umount $(ROOTFS)
 	sudo losetup -D
 
