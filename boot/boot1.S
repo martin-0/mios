@@ -14,7 +14,7 @@
 	pushw $\addr
 	pushw $(func_debug1)
 	call printf16
-	addw $8, %sp
+	addw $4, %sp
 .endm
 
 _start:
@@ -311,16 +311,30 @@ _start:
 
 	movl $(boot_partition), %eax			/* initialize ext2 module */
 	call ext2_initmod				/* int16_t ext2_initmod(boot_partition *bp) */
+	test %ax, %ax
+	jz .Linitok
 
-
+	/* XXX: in the future I could jump to a cmdline and maybe try to find other disks to look for partitions */
 	movzxb (errno16), %dx
 	pushw %dx
 	pushw %ax
 	pushw $(initmsg)
 	call printf16
-
 	call dbg_ext2_dumpvars
+	jmp panic16
 
+.Linitok:
+/*
+	dbg_show_addr ext2_block_in_cache
+	call dbg_ext2_dumpvars
+*/
+	dbg_show_addr ext2_search_in_dbp
+
+	movw $(strkernel), %ax
+	call ext2_search_file				/* ext2_search_file("/boot/kernel") */
+
+	movw $(debug_info_halt), %ax
+	call puts16
 	cli
 	hlt
 
@@ -433,6 +447,9 @@ panic16:
 	cli
 	call dump_regs
 
+	movw $(panic_stack), %ax
+	call puts16
+
 	movw $0x10, %dx
 	movw %sp, %ax
 	call dump_mem16
@@ -502,6 +519,8 @@ panic16:
 	leftovers:			.word 0		/* leftover partitons to read */
 
 	msg_boot1:	.asciz	">MIOS boot1\r\n"
+	strkernel:	.asciz	"/boot/kernel"
+
 	fatal_error:	.asciz	"FATAL ERROR: system halted.\r\n"
 	fatal_a20:	.asciz	"Failed to activate A20 gate, aborting.\r\n"
 	fatal_read:	.asciz	"disk read failed with error 0x%x\r\n"
@@ -512,7 +531,9 @@ panic16:
 	msg_bios_err:	.asciz	"BIOS function failed, error code: %x\r\n"
 	msg_mem_err:	.asciz	"Failed to get memory map from BIOS.\r\n"
 
-	func_debug1:	.asciz	"address: 0x%x\r\n"
+	panic_stack:	.asciz	"stack:\r\n"
+
+	func_debug1:	.asciz	"symbol: 0x%x\r\n"
 
 	initmsg:	.asciz	"ext2_initmod returned %d, errno: %d\r\n"
 
@@ -526,3 +547,5 @@ panic16:
 		dbgmsg_doleftovers:	.asciz	"doing leftovers\r\n"
 		dbgmsg_leftovers_stats:	.asciz	"%d leftovers need %d %d-sectors to read\r\n"
 	.endif
+
+	debug_info_halt:	.asciz	"info: system halted for now.\r\n"
