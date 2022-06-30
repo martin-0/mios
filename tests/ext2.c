@@ -69,6 +69,11 @@ NOTES for asm:
 
 #define	PANIC_IF_ERR		1
 
+#define	PATH_MAX		4096
+#define	NAME_MAX		255
+#define	FAST_SYMLINK_SIZE	60
+#define	MAX_SYMLINK_FOLLOW	40
+
 // block buffer
 typedef struct bbuf {
 	unsigned int start_blkid;	// start of the cached block id
@@ -87,6 +92,11 @@ unsigned int blkid_gdt;				// block id of the global group descriptor table
 int block_size;					// block size ( 1024 << sb.s_log_block_size )
 int inodes_per_block;
 
+// XXX: way too much memory used for this 
+char pathbuf[PATH_MAX];			// buffer used for path resolution
+char pathbuftmp[PATH_MAX];		// used during symlink resolution
+int symlink_depth;			// how many times did we try to follow symlink
+
 void show_sblock();
 void show_gde(struct ext2_group_desc* gde, int hdr);
 void show_bbuf(bbuf_t* buf, int size);
@@ -97,7 +107,7 @@ int access_inode(int fd, int inum, struct ext2_inode* inode);
 int access_gde(int fd, int inum, struct ext2_group_desc* gd_entry);
 char* access_block(int fd, unsigned int blkid, bbuf_t* bbf);
 
-int handle_symlink(int fd, struct ext2_inode* inode);
+int handle_symlink(int fd, struct ext2_inode* inode, bbuf_t* bbuf);
 
 int search_dir_entry(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr);
 int search_dir_entry_nohash(char* buf, char* matchstr);
@@ -139,27 +149,44 @@ int main(int argc, char** argv) {
 	show_sblock();
 
 	struct ext2_inode inode;
-
 	bbuf_t bbuf;
 	init_bbuf(&bbuf);
-
-	char kernel[] = "/boot/kernel";
 	int inum;
 
-	// if kernel[0] == '/'
-	inum = 2;
-	if ((access_inode(fd, inum, &inode)) != 0) {
-		printf("failed to access inode %d\n", inum);
-		goto out;
-	}
+	symlink_depth = 0;
 
-	if (! (inode.i_mode & 0x4000) ) {
-		printf("oops: root inode %d is not a directory\n", inum);
-		goto out;
-	}
+	char* kernel = "./boot/kernel";
+	char* token;
 
-	char *token = strtok(kernel, "/");
+	strcpy(pathbuf, kernel);
+	printf("search path: %s\n", pathbuf);
+	token = pathbuf;
+
 	while(token != NULL) {
+		printf("current pathbuf: %s\n", pathbuf);
+		if (pathbuf[0] == '/') {
+			inum = 2;
+			if ((access_inode(fd, inum, &inode)) != 0) {
+				printf("failed to access inode %d\n", inum);
+				goto out;
+			}
+
+			if (! (inode.i_mode & 0x4000) ) {
+				printf("oops: root inode %d is not a directory\n", inum);
+				goto out;
+			}
+
+			printf("absolute path, we'll search for %s\n", token);
+			token = strtok(pathbuf, "/");
+		}
+
+		_exit(42);
+
+
+		if ((access_inode(fd, inum, &inode)) != 0) {
+			printf("failed to access inode %d\n", inum);
+			goto out;
+		}
 
 		//printf("** inode i_blocks: %d, max index in i_block[] is %d\n", inode.i_blocks, inode.i_blocks/(2<< sb.s_log_block_size));
 
@@ -178,11 +205,9 @@ int main(int argc, char** argv) {
 		dump_memory((int*)&inode, 128);
 
 		if (inode.i_mode & 0xA000) {
-
 			// handle symlink()
-			handle_symlink(fd, &inode);
-
-			_exit(2);
+			handle_symlink(fd, &inode, &bbuf);
+			printf("pathbuf after handle_symlink: %s\n", pathbuf);
 		}
 
 		token = strtok(NULL, "/");
@@ -206,43 +231,62 @@ out:
 	return 0;
 }
 
-int handle_symlink(int fd, struct ext2_inode* inode) {
+int handle_symlink(int fd, struct ext2_inode* inode, bbuf_t* bbuf) {
 	printf("handle_symlink: inode size: %d\n", inode->i_size);
-	bbuf_t bbuf;
 	char* buf;
 
-	init_bbuf(&bbuf);
+	if ( symlink_depth++ > MAX_SYMLINK_FOLLOW) {
+		printf("handle_symlink: too many symlinks levels\n");
+		return 1;
+	}
 
-	// XXX:	MAX_PATH is defined usually as 4096 and NAME_MAX 255. 
-
-	// code that called handle_symlink() is trying to resolve the inum that is a symlink to whatever the link is pointing to
-	// new buffer has to be used, the whole search should be treated as separate search
-	// i can't keep this up though, what if path this symlink has contains more symlinks .. i'll get into recursive hell
-	// also handling memory in bootloader for this will be very problematic .. 
-
-	// should i drop symlink support alltogether or now ? 
-
-	// fastlink
-	if (inode->i_size < 60) {
+	if (inode->i_size < FAST_SYMLINK_SIZE) {
 		buf = (char*)&inode->i_block[0];
 	}
 	else {
-		if ((buf = access_block(fd, inode->i_block[0], &bbuf)) == NULL) { return 0; }
-		show_bbuf(&bbuf, 128);
+		if ((buf = access_block(fd, inode->i_block[0], bbuf)) == NULL) { return 0; }
+		show_bbuf(bbuf, 128);
 	}
+
+	if (strlen(buf) > NAME_MAX) {
+		printf("handle_symlink: oops: symlink name more than %d chars\n", NAME_MAX);
+		#ifdef PANIC_IF_ERR
+			_exit(42);
+		#endif	
+		return 1;
+	}
+
 	printf("handle_symlink: symlink name: %s\n", buf);
+
+	// XXX: this is just awful .. but i do need tmp buf to create new path
+	strcpy(pathbuftmp, buf);
+	char* ptrtmp = (char*)(pathbuf + strlen(pathbuf)+1);
+	strcat(pathbuftmp, "/");
+	strcat(pathbuftmp, ptrtmp);
+	strcpy(pathbuf, pathbuftmp);
 
 	return 0;
 }
 
+// search for matchstr in directory pointed by inode
+//
 // returns inum if found, 0 otherwise
 int search_dir_entry(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr) {
 	char* bufloc;
-	int i,ret;
+	int i,found_inum;
 
 	#ifdef DEBUG
 		printf("search_dir: looking for %s\n", matchstr);
 	#endif
+
+	if (!(inode->i_mode & 0x4000)) {
+		printf("search_dir_entry: not a dir inode\n");
+		#ifdef PANIC_IF_ERR
+			dump_memory((int*)inode, 128);
+			_exit(42);
+		#endif
+		return 0;
+	}
 
 	for (i =0 ; i < 12; i++) {
 		#ifdef DEBUG
@@ -254,24 +298,26 @@ int search_dir_entry(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* match
 
 		// read the DBP
 		if ((bufloc = access_block(fd, inode->i_block[i], bbuf)) == NULL) { return 0; }
-		if ((ret = search_dir_entry_nohash(bufloc, matchstr)) != 0)
-			return ret;
+		if ((found_inum = search_dir_entry_nohash(bufloc, matchstr)) != 0)
+			return found_inum;
 	}
 
 	printf("search_dir: moving to indirect blocks\n");
 
 	// read the single indirect block pointer and process it
 	if ((bufloc = access_block(fd, inode->i_block[12], bbuf)) == NULL) { return 0; }
-	if ((ret = search_dir_entry_nohash_sibp(fd, bufloc, matchstr)) != 0)
-		return ret;
+	if ((found_inum = search_dir_entry_nohash_sibp(fd, bufloc, matchstr)) != 0)
+		return found_inum;
 
+	// read the double indirect block pointer and process it
 	if ((bufloc = access_block(fd, inode->i_block[13], bbuf)) == NULL) { return 0; }
-	if ((ret = search_dir_entry_nohash_dibp(fd, bufloc, matchstr)) != 0)
-		return ret;
+	if ((found_inum = search_dir_entry_nohash_dibp(fd, bufloc, matchstr)) != 0)
+		return found_inum;
 
+	// read the tripple indirect block pointer and process it
 	if ((bufloc = access_block(fd, inode->i_block[14], bbuf)) == NULL) { return 0; }
-	if ((ret = search_dir_entry_nohash_tibp(fd, bufloc, matchstr)) != 0)
-		return ret;
+	if ((found_inum = search_dir_entry_nohash_tibp(fd, bufloc, matchstr)) != 0)
+		return found_inum;
 
 	return 0;
 }
