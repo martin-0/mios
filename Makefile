@@ -29,7 +29,7 @@ tools:
 disk:
 	rm -f $(DISK_RAW)
 	dd if=/dev/zero of=$(DISK_RAW) bs=1024k count=256
-	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:A501 -n 2:4096:266239 -t 2:8300 ./disk00.raw
+	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:736f696d-0001-0002-0003-feedcafef00d -n 2:4096:266239 -t 2:8300 ./disk00.raw
 	sudo losetup -P /dev/loop0 ./disk00.raw
 	sudo mkfs.ext2 -b 4096 /dev/loop0p2
 	sudo mkdir -p $(ROOTFS)
@@ -52,7 +52,7 @@ disk-umount:
 disk-efi:
 	rm -f $(DISK_RAW)
 	dd if=/dev/zero of=$(DISK_RAW) bs=1024k count=256
-	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:A501 -n 2:4096:266239 -t 2:8300 -n 3:266240:331775 -t 3:ef00 ./disk00.raw
+	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:736f696d-0001-0002-0003-feedcafef00d -n 2:4096:266239 -t 2:8300 -n 3:266240:331775 -t 3:ef00 ./disk00.raw
 	
 clean:
 	make -C tools clean

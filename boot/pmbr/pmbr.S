@@ -3,7 +3,7 @@
 /*
  * Protective MBR on GPT disk. 
  *
- * Searching for freebsd-boot (83BD6B9D-7F41-11DC-BE0B-001560B84F0F) partition.
+ * Searching for mios-boot (736f696d-0001-0002-0003-feedcafef00d) partition.
  * Once found its contents is loaded to the 07c00:0000 buffer. Its size can't be more than seven 64kB segments.
  * LBAs are treated as 32b numbers. Partition end has to fit within this range.
  *
@@ -149,7 +149,7 @@ _start:
 .Lparse_buffer:
 	push %cx				/* save main counter */
 	push %di
-	leaw (freebsd_boot_disk_guid), %si
+	leaw (mios_boot_disk_guid), %si
 	movw $16, %cx				/* partition GUID size */
 	repe cmpsb				/* cmps is doing ds:si to es:di comparison */
 
@@ -302,8 +302,9 @@ puts16:
 
 	.align 4
 	/* XXX: check how the signature is on big-endian systems */
-	freebsd_boot_disk_guid:
-		.byte 0x9d, 0x6b, 0xbd, 0x83, 0x41, 0x7f, 0xdc, 0x11, 0xbe, 0x0b, 0x00, 0x15, 0x60, 0xb8, 0x4f, 0x0f
+	mios_boot_disk_guid:
+		/* 736f696d-0001-0002-0003-feedcafef00d */
+		.byte 0x6D, 0x69, 0x6F, 0x73, 0x01, 0x00, 0x02, 0x00, 0x00, 0x03, 0xfe, 0xed, 0xca, 0xfe, 0xf0, 0x0d
 
 	lba_dap:
 		.byte 0x10			/* size of the packet */
