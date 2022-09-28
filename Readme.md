@@ -5,3 +5,10 @@ My **attempt** to write something. Calling it an OS would be .. overstatement. I
 **ext2 boot module** - resolve the symlink issues
 Maybe the best option here would be just to drop the support and continue without it. I can come back to it later (solve one problem at a time).
 
+
+### To run the VM
+```sh
+make disk
+make
+./run.sh
+```
