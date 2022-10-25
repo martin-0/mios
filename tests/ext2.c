@@ -92,7 +92,6 @@ unsigned int blkid_gdt;				// block id of the global group descriptor table
 int block_size;					// block size ( 1024 << sb.s_log_block_size )
 int inodes_per_block;
 
-// XXX: way too much memory used for this 
 char pathbuf[PATH_MAX];			// buffer used for path resolution
 char pathbuftmp[PATH_MAX];		// used during symlink resolution
 int symlink_depth;			// how many times did we try to follow symlink
@@ -107,7 +106,7 @@ int access_inode(int fd, int inum, struct ext2_inode* inode);
 int access_gde(int fd, int inum, struct ext2_group_desc* gd_entry);
 char* access_block(int fd, unsigned int blkid, bbuf_t* bbf);
 
-int handle_symlink(int fd, struct ext2_inode* inode, bbuf_t* bbuf);
+int handle_symlink(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* ntoken);
 
 int search_dir_entry(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* matchstr);
 int search_dir_entry_nohash(char* buf, char* matchstr);
@@ -151,21 +150,28 @@ int main(int argc, char** argv) {
 	struct ext2_inode inode;
 	bbuf_t bbuf;
 	init_bbuf(&bbuf);
-	int inum;
+	int inum = 0;
 
 	symlink_depth = 0;
 
-	char* kernel = "./boot/kernel";
-	char* token;
+	char kernel[] = "/boot/kernel";
+	char* token, *ntoken = NULL;
 
 	strcpy(pathbuf, kernel);
 	printf("search path: %s\n", pathbuf);
-	token = pathbuf;
 
+	token = pathbuf;
 	while(token != NULL) {
-		printf("current pathbuf: %s\n", pathbuf);
-		if (pathbuf[0] == '/') {
+
+		printf("token: %s, next token: %s\n", token, ntoken);
+
+		// access_inode() does: access_gde()->access_block()->copy_to_inode
+
+		// read root dir
+		if (token[0] == '/') {
 			inum = 2;
+
+			printf("starting with pathbuf: %s\n", pathbuf);
 			if ((access_inode(fd, inum, &inode)) != 0) {
 				printf("failed to access inode %d\n", inum);
 				goto out;
@@ -175,21 +181,44 @@ int main(int argc, char** argv) {
 				printf("oops: root inode %d is not a directory\n", inum);
 				goto out;
 			}
+			token = strtok_r(pathbuf, "/", &ntoken);
+			continue;
 
-			printf("absolute path, we'll search for %s\n", token);
-			token = strtok(pathbuf, "/");
 		}
 
-		_exit(42);
+		// assumes we have directory opened and referenced by inode
+		if ((inum = search_dir_entry(fd, &inode, &bbuf, token)) == 0) {
+			printf("%s not found\n", token);
+			goto out;
+		} else {
+			printf("%s is in inode %d\n", token, inum);
+		}
 
-
+		printf("lookign up inum: %d\n", inum);
 		if ((access_inode(fd, inum, &inode)) != 0) {
 			printf("failed to access inode %d\n", inum);
 			goto out;
 		}
 
+
+		// XXX: I've already overwritten inode with the other entry yet handlesymlink wants me to search there 
+		//	after path is fixed
+
+		// XXX: i need to save the dirnode I'm searching files in as I need to reference that back in case of symlink
+
+		printf("%d mode: %x\n", inum, inode.i_mode);
+		// is it a symlink?
+		if (inode.i_mode & 0xA000) {
+			handle_symlink(fd, &inode, &bbuf, ntoken);
+			token = strtok_r(pathbuf, "/", &ntoken);
+			printf("new pathbuf: %s, token: %s, ntoken: %s\n", pathbuf, token, ntoken);
+
+			continue;
+		}
+
 		//printf("** inode i_blocks: %d, max index in i_block[] is %d\n", inode.i_blocks, inode.i_blocks/(2<< sb.s_log_block_size));
 
+	/*
 		if ((inum = search_dir_entry(fd, &inode, &bbuf, token)) == 0) {
 			printf("%s not found\n", token);
 			goto out;
@@ -202,15 +231,9 @@ int main(int argc, char** argv) {
 			printf("failed to access inode %d\n", inum);
 			goto out;
 		}
+	*/
 		dump_memory((int*)&inode, 128);
-
-		if (inode.i_mode & 0xA000) {
-			// handle symlink()
-			handle_symlink(fd, &inode, &bbuf);
-			printf("pathbuf after handle_symlink: %s\n", pathbuf);
-		}
-
-		token = strtok(NULL, "/");
+		token = strtok_r(NULL, "/", &ntoken);
 	}
 
 	if ((access_inode(fd, inum, &inode)) != 0) {
@@ -231,7 +254,7 @@ out:
 	return 0;
 }
 
-int handle_symlink(int fd, struct ext2_inode* inode, bbuf_t* bbuf) {
+int handle_symlink(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* ntoken) {
 	printf("handle_symlink: inode size: %d\n", inode->i_size);
 	char* buf;
 
@@ -258,12 +281,16 @@ int handle_symlink(int fd, struct ext2_inode* inode, bbuf_t* bbuf) {
 
 	printf("handle_symlink: symlink name: %s\n", buf);
 
-	// XXX: this is just awful .. but i do need tmp buf to create new path
+
 	strcpy(pathbuftmp, buf);
-	char* ptrtmp = (char*)(pathbuf + strlen(pathbuf)+1);
-	strcat(pathbuftmp, "/");
-	strcat(pathbuftmp, ptrtmp);
+
+	if (*ntoken) {
+		strcat(pathbuftmp, "/");
+		strcat(pathbuftmp, ntoken);
+	}
 	strcpy(pathbuf, pathbuftmp);
+
+	// XXX: i need to restart strtok
 
 	return 0;
 }
