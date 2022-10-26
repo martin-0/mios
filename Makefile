@@ -41,11 +41,13 @@ disk:
 	sudo losetup -D
 
 disk-mount:
+dm:
 	sudo losetup -P /dev/loop0 ./disk00.raw
 	sudo mkdir -p $(ROOTFS)
 	sudo mount /dev/loop0p2 $(ROOTFS)
 
 disk-umount:
+du:
 	sudo umount $(ROOTFS)
 	sudo losetup -D
 
