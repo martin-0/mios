@@ -102,7 +102,7 @@ void show_bbuf(bbuf_t* buf, int size);
 void dump_memory(int* addr, int size);
 void init_bbuf(bbuf_t* b);
 
-int access_inode(int fd, int inum, struct ext2_inode* inode);
+int access_inode(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf);
 int access_gde(int fd, int inum, struct ext2_group_desc* gd_entry);
 char* access_block(int fd, unsigned int blkid, bbuf_t* bbf);
 
@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
 			inum = 2;
 
 			printf("starting with pathbuf: %s\n", pathbuf);
-			if ((access_inode(fd, inum, &dirnode)) != 0) {
+			if ((access_inode(fd, inum, &dirnode, &bbuf)) != 0) {
 				printf("failed to access dirnode %d\n", inum);
 				goto out;
 			}
@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
 		}
 
 		printf("lookign up inum: %d\n", inum);
-		if ((access_inode(fd, inum, &inode)) != 0) {
+		if ((access_inode(fd, inum, &inode, &bbuf)) != 0) {
 			printf("failed to access inode %d\n", inum);
 			goto out;
 		}
@@ -341,7 +341,7 @@ int search_dir_entry(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* match
 
 // searches for inode inum, if found inode structure is updated
 // returns 0 if all ok, err otherwise
-int access_inode(int fd, int inum, struct ext2_inode* inode) {
+int access_inode(int fd, int inum, struct ext2_inode* inode, bbuf_t* bbuf) {
 	// NOTE:	inode_table can spread on more blocks. i need to find the proper block offset within the inode table
 	int block_group,idx,idx2,bix;
 
@@ -365,12 +365,13 @@ int access_inode(int fd, int inum, struct ext2_inode* inode) {
 		return -1;
 	}
 
-	bbuf_t bbuf;	// NOTE: local bbuf
-	init_bbuf(&bbuf);
+	//bbuf_t bbuf;	// NOTE: local bbuf
+	//init_bbuf(&bbuf);
+
 	char* bufloc;
 
 	// find the inode_table for given group, adjust for the block index
-	if ((bufloc = access_block(fd, (gde.bg_inode_table+bix), &bbuf)) == NULL) { return -2; }
+	if ((bufloc = access_block(fd, (gde.bg_inode_table+bix), bbuf)) == NULL) { return -2; }
 
 	// buffer holds the blocksize full of inode
 	memcpy(inode, (struct ext2_inode*)(bufloc)+idx2 , sizeof(*inode));
