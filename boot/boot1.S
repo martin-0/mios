@@ -1,5 +1,5 @@
 /* martin */
-	.set BUFADDR, 0x3000
+	.set BUFADDR, 0x5000
 	.set PAGE_SIZE, 0x1000				//  \  intentionally set to the same size
 	.set BUFSZ, 0x1000				//  /
 
@@ -311,28 +311,15 @@ _start:
 
 	movl $(boot_partition), %eax			/* initialize ext2 module */
 	call ext2_initmod				/* int16_t ext2_initmod(boot_partition *bp) */
-	test %ax, %ax
-	jz .Linitok
 
-	/* XXX: in the future I could jump to a cmdline and maybe try to find other disks to look for partitions */
-	movzxb (errno16), %dx
-	pushw %dx
-	pushw %ax
-	pushw $(initmsg)
-	call printf16
-	call dbg_ext2_dumpvars
-	jmp panic16
-
-.Linitok:
-/*
-	dbg_show_addr ext2_block_in_cache
-	call dbg_ext2_dumpvars
-*/
-	dbg_show_addr ext2_search_in_dbp
+	dbg_show_addr .Lhint1
+	nop
+	nop
 
 	movw $(strkernel), %ax
 	call ext2_search_file				/* ext2_search_file("/boot/kernel") */
 
+haltme:
 	movw $(debug_info_halt), %ax
 	call puts16
 	cli
@@ -390,7 +377,7 @@ search_uuid_buf:
 
 /* do_read()
  *
- * wrapper func to read16, uses bp_bootdrive,dap defined here in boot1.S. read failure means panic
+ * wrapper func to diskread16, uses bp_bootdrive,dap defined here in boot1.S. read failure means panic
 */
 .func do_read
 do_read:
@@ -413,7 +400,7 @@ do_read:
 
 	leaw (lba_dap), %dx
 	movw (bp_bootdrive), %ax
-	call read16				/* read16(int16_t disk, struct lba_dap* dap) */
+	call diskread16				/* read16(int16_t disk, struct lba_dap* dap) */
 
 	test %ax,%ax
 	jz .Lend_do_read
@@ -533,7 +520,7 @@ panic16:
 
 	panic_stack:	.asciz	"stack:\r\n"
 
-	func_debug1:	.asciz	"symbol: 0x%x\r\n"
+	func_debug1:	.asciz	"debug: 0x%x\r\n"
 
 	initmsg:	.asciz	"ext2_initmod returned %d, errno: %d\r\n"
 

@@ -155,7 +155,6 @@ int main(int argc, char** argv) {
 	symlink_depth = 0;
 
 	char kernel[] = "/boot/kernel";
-	//char kernel[] = "/boot/jadro";
 	char* token, *ntoken = NULL;
 
 	strcpy(pathbuf, kernel);

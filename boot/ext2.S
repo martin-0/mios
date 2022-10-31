@@ -1,6 +1,7 @@
 /* martin */
 
 /* Assumptions and considerations:
+
 	LBA limit:	DAP's starting block number is 64b number. Support for this complicates things.
 			I'll treat this number as 32b. This means no support for partition beyond 2TB. 
 
@@ -31,10 +32,10 @@
 	.set EXT2_DENTRY_OFST_NAMELEN, 6		/* len of the name entry */
 	.set EXT2_DENTRY_OFST_NAME, 8			/* name of the entry being described */
 
-	.set BUFADDR, 0x3000				/* it's buffer for ext2 module. it's expected nobody else is writting to it. */
+	.set SECTORSZ, 512				/* disk sector size */
 	.set BUFSZ, 0x1000
 	.set PAGE_SIZE, 0x1000
-	.set SECTORS_IN_BUF, 8				/* 4096/512 = 8 */
+	.set SECTORS_IN_BUF, 8				/* statically computed from BUFSZ/512 = 8 */
 
 	/* enums */
 	.set ETOOBIG, 1
@@ -45,6 +46,7 @@
 	.set ENOBLOCKS, 6
 	.set ENOBLCPG, 7
 	.set ENOINOPG, 8
+	.set EBLKINODE, 9
 
 .section .text
 	.code16
@@ -70,18 +72,18 @@ ext2_initmod:
 	movw %ax, (w_bp_disk)
 
 	/* partition's LBA has to be in 32B limit as stated in notes above */
-	movl (q_bp_lba_end+4), %eax
+	movl (q_part_lba_end+4), %eax
 	test %eax, %eax
 	jz .Lprepdap
 
-	movw $(ext2_partition_toobig), %ax
+	movw $(ext2_init_part_toobig), %ax
 	call puts16
 	.ifdef DEBUG_VERBOSE
 		pushw (w_bp_disk)
-		pushl (q_bp_lba_end)
-		pushl (q_bp_lba_end+4)
-		pushl (q_bp_lba_start)
-		pushl (q_bp_lba_start+4)
+		pushl (q_part_lba_end)
+		pushl (q_part_lba_end+4)
+		pushl (q_part_lba_start)
+		pushl (q_part_lba_start+4)
 		pushw $(ext2_dbg_bootpartition_llx)
 		call printf16
 		addw $20, %sp
@@ -91,42 +93,38 @@ ext2_initmod:
 	jmp .Linitm_end
 
 .Lprepdap:
-	/*
-	 * Prepare the DAP for reading the superblock.
-	 * These values then stay the same, only q_dap_start will change depending on blockid.
-	*/
-	movw $BUFADDR, (w_dap_buf)			/* set buffer */
-	movw $BUFADDR, (w_bc_addr)			/* DAP and ext2 buffer are the same */
-	movw $SECTORS_IN_BUF,(w_dap_sectors)		/* fill up the whole buffer */
-	movl (q_bp_lba_start), %eax			/* set start LBA  */
-	movl %eax, (q_dap_start)
-	movl $0, (q_dap_start+4)			/* the only time when this is touched, it stays 0 always */
+	/* we can't use access_block yet, we need superblock first */
+	movl $(readbuf), %ecx
+	movl $SECTORS_IN_BUF, %edx
+	movl (q_part_lba_start), %eax			/* set start LBA of partition */
 
 	.ifdef DEBUG_VERBOSE
 		call dbg_ext2_show_partition
 	.endif
-	call ext2_read
+	call ext2_readdisk
 
 	test %ax,%ax					/* ax is set to 1 along with errno16 in case of an error */
 	jnz .Linitm_end
 
-	movl $BUFADDR, %esi				/* buffer */
+	/* check the ext2 signature first */
+	movl $(readbuf), %esi
 	addl $EXT2_OFST_SUPERBLOCK, %esi		/* offset to superblock */
 	cmpw $EXT2_MAGIC, EXT2_SB_OFST_MAGIC(%si)
 	je .Lmagic_ok
 	
-	movw $(ext2_no_magic), %ax			/* partition doesn't have magic word, rejecting to continue */
+	movw $(ext2_init_nomagic), %ax			/* partition doesn't have magic word, rejecting to continue */
 	call puts16
 	movw $ENOMAGIC, %ax				/* set error code */
 	jmp .Linitm_end
 
 .Lmagic_ok:
+	/* check the ext2 fs state */
 	movl EXT2_SB_OFST_STATE(%si), %eax		/* loads 2B s_state and 2B s_error at the same time */
 	cmpw $1, %ax					/* 1: VALID_FS, 2: ERROR_DETECTED */
 	je .Lbsize					/* OK to proceed with valid FS */
 
 	pushl %eax					/* inform about the unclean FS */
-	movl $(ext2_fs_state_unclean), %eax
+	movl $(ext2_init_fs_state_unclean), %eax
 	call puts16
 	popl %eax
 
@@ -140,7 +138,7 @@ ext2_initmod:
 .Lstate_ok_enough:
 	.ifdef DEBUG_VERBOSE
 		pushw %ax
-		pushw $(ext2_fs_state_okenough)
+		pushw $(ext2_init_fs_state_okenough)
 		call printf16
 		addw $4, %sp
 	.endif	
@@ -154,7 +152,7 @@ ext2_initmod:
 
 	.ifdef DEBUG_VERBOSE
 		pushw %ax
-		pushw $(ext2_bs_unsupported)
+		pushw $(ext2_init_bsize_unsupported)
 		call printf16
 		addw $4, %sp
 	.endif
@@ -163,7 +161,7 @@ ext2_initmod:
 	jmp .Linitm_end
 
 .Lbs_ok:
-	movl %eax, (l_ext2_s_blocksize)			/* save the block size */
+	movl %eax, (l_ext2_sb_blocksize)		/* save the block size */
 	shrl $9, %eax					/* blocksize >> 9 = how many sectors is one block size; sector size is 512 */
 	movw %ax, (w_ext2_blocksize_in_sectors)
 
@@ -171,27 +169,29 @@ ext2_initmod:
 	shrl %cl, %edx					/* edx: l_bc_block_capacity; ecx = s_log_block_size ; 4 >> s_log_block_size ; BUFSZ/1024 = 4 */
 
 	/* unlikely but check */
-	movl EXT2_SB_OFST_ALLBLOCKS(%si), %eax		/* l_ext2_s_total_blocks */
+	movl EXT2_SB_OFST_ALLBLOCKS(%si), %eax		/* l_ext2_sb_blocks_count */
 	testl %eax, %eax
 	jnz .Lcheck_tb
 	movw $ENOBLOCKS, %ax				/* it's expected to have some blocks on FS */
 	jmp .Linitm_end	
 
 .Lcheck_tb:
-	movl %eax, (l_ext2_s_total_blocks)		/* save it */
-	cmpl %eax, %edx					/* l_bc_block_capacity < l_ext2_s_total_blocks */
+	movl %eax, (l_ext2_sb_blocks_count)		/* save it */
+	cmpl %eax, %edx					/* l_bc_block_capacity < l_ext2_sb_blocks_count */
 	jb .Lcapok
-	movl %eax, (l_bc_block_capacity)		/* buffer can hold more than l_ext2_s_total_blocks, adjust it to this size then */
+	movl %eax, (l_bc_block_capacity)		/* buffer can hold more than l_ext2_sb_blocks_count, adjust it to this size then */
 	jmp .Lnodesz
 
 .Lcapok:
 	movl %edx, (l_bc_block_capacity)
 
+	// TODO: drop this maybe
+
 	/* precalculate offsets into cache */
 	movl %edx, %ecx					/* block capacity */			
 	movl $(w_bc_offsets), %edi			/* start of the offsets */
 	xorl %eax,%eax
-	movl (l_ext2_s_blocksize), %edx			/* block size */
+	movl (l_ext2_sb_blocksize), %edx		/* block size */
 .Lsetoffsts:
 	stosw
 	addw %dx, %ax
@@ -199,13 +199,12 @@ ext2_initmod:
 
 .Lnodesz:
 	movl EXT2_SB_OSFT_REV_LEVEL(%si), %eax		/* check the revision version, i.e. major version */
-	movl %eax, l_ext2_s_rev_level
-
+	movl %eax, (l_ext2_sb_rev_level)
 	testl %eax, %eax				/* handle version-dependent variables */
 	jz .Lvers0
 
 	movw EXT2_SB_OFST_INODE_SZ(%si), %ax		/* inode size can't be bigger than block size */
-	cmpw %ax, (l_ext2_s_blocksize)
+	cmpw %ax, (l_ext2_sb_blocksize)
 	jge .Linodesz.1
 
 .Lbadinodesz:
@@ -215,23 +214,34 @@ ext2_initmod:
 .Linodesz.1:
 	testw %ax, %ax					/* return error if inode is 0 size */
 	jz .Lbadinodesz
-
-	movw %ax, (w_ext2_s_inode_size)			/* inode size ok, save it */
+	movw %ax, (w_ext2_sb_inode_size)		/* inode size ok, save it */
 	jmp .Lsb_cont
 
 .Lvers0:
 	/* default inode size */
-	movw $EXT2_DEFAULT_INODE_SIZE, (w_ext2_s_inode_size)
+	movw $EXT2_DEFAULT_INODE_SIZE, (w_ext2_sb_inode_size)
 
 .Lsb_cont:
-	movl EXT2_SB_OFST_BLOCK_PG(%si), %eax		/* l_ext2_s_blocks_per_group */
+	/* compute inodes_per_block */
+	movl (l_ext2_sb_blocksize), %eax		/* inodes_per_block = l_ext2_sb_blocksize/w_ext2_sb_inode_size */
+	movzxw (w_ext2_sb_inode_size), %ecx
+	xorl %edx,%edx
+	div %ecx
+	test %edx, %edx					/* we should not have any leftover by this division */
+	jz .Lipb_ok
+	movl $EBLKINODE, %eax
+	jmp .Linitm_end
+
+.Lipb_ok:
+	movl %eax, (l_ext2_inodes_per_block)
+	movl EXT2_SB_OFST_BLOCK_PG(%si), %eax		/* l_ext2_sb_blocks_per_group */
 	testl %eax, %eax				/* can't be 0 */
 	jnz .Lbpg_ok
 	movw $ENOBLCPG, %ax
 	jmp .Linitm_end
 
 .Lbpg_ok:
-	movl %eax, (l_ext2_s_blocks_per_group)		/* save l_ext2_s_blocks_per_group */
+	movl %eax, (l_ext2_sb_blocks_per_group)		/* save l_ext2_sb_blocks_per_group */
 	movl EXT2_SB_OFST_INODES_PG(%si), %eax
 	test %eax, %eax					/* can't be 0 */
 	jnz .Lipg_ok
@@ -239,7 +249,14 @@ ext2_initmod:
 	jmp .Linitm_end
 
 .Lipg_ok:
-	movl %eax, (l_ext2_s_inodes_per_group)		/* save inodes per group */
+	movl %eax, (l_ext2_sb_inodes_per_group)		/* save inodes per group */
+
+	/* precompute floor of the inode_size to speed up lookups in access_inode */
+.global .Lhint1
+.Lhint1:
+	movl (w_ext2_sb_inode_size), %eax
+	bsr %ax, %cx
+	movw %cx, (w_ext2_inode_size_floor)
 
 	/* XXX: I should implement check on version, to see if there are features that would block me reading the FS */
 
@@ -252,10 +269,24 @@ ext2_initmod:
 			4k block: [padding 0x400|superblock|padding]		; gbdt is not in cache
 	*/
 
-	xorl %eax, %eax
-	movl %eax, (l_bc_block_start)			/* our buffer starts at block 0 */
+	// XXX: right now I have two variables:
+	//	l_bc_block_start	blockid where gdt is
+	//	l_ext2_bgdt_lba_start	lba where gdt starts
 
-	cmpl $1024, (l_ext2_s_blocksize)
+	// this is a prep work for ext2_access_gde() that requires LBA only .. i should probably drop the other variable completely
+	//
+
+	xorl %edx, %edx					/* finish buffer cache setup */
+	movl %edx, (l_bc_block_start)			/* our buffer starts at block 0 */
+
+	movl (l_ext2_sb_blocksize), %eax		/* blocksize / 512 = LBAs */
+	movw $SECTORSZ, %cx
+	div %cx
+
+	addl (q_part_lba_start), %eax
+	movl %eax, (l_ext2_bgdt_lba_start)
+
+	cmpl $1024, (l_ext2_sb_blocksize)		/* XXX: I'm keeping it for now but I think I don't need it */
 	jne .Lbsnot1k
 
 	movl $2, (l_ext2_bgdt_bstart)			/* block group descriptor table starts at block id 2 */
@@ -265,7 +296,7 @@ ext2_initmod:
 	movl $1, (l_ext2_bgdt_bstart)			/* block group descriptor table starts at block id 1 */
 
 .Lext2_clrstat:
-	/* eax 0 from previous section */
+	xorl %eax, %eax
 	movl %eax, (l_bc_hits)				/* 0 down the statistics */
 	movl %eax, (l_bc_total)
 
@@ -276,343 +307,280 @@ ext2_initmod:
 	ret
 .endfunc
 
-/* int16_t ext2_search_file(char* fname, fixme: maybe structure as 2nd param to a file ?
- *
- * CF set: error
- * return 0 - ok
-*/
+/* XXX: for now: dummy function called from boot1 to test ext2 module */
 .global ext2_search_file
 .func ext2_search_file
 ext2_search_file:
-	pushl %esi
-	pushl %edi
-	pushl %ebx
+	call dbg_ext2_show_superblock
 
+	movl $(dirnode), %edx
+	movl $2, %eax
+	call ext2_access_inode
 
-/* FIXME issues:
-	Too many variables are in this function. I need to set proper stack and save it there. 
-	I need to compute block_group/index for every inode i found along the path. 
-	What if block group for inode table I loaded is not in cache? I need to load the next block then.. 
+	//call dbg_ext2_show_bgt_cache
 
-	I should really do this first on paper or in C to see what I should actually do .. 
-*/
-	
-
-
-	// fixme: should be done differently
-	pushl %eax					/* save fname on stack for now */
-
-	movl $(w_bc_offsets), %ebx			/* offsets */
-
-	/*
-		block group = (inode-1)/l_ext2_s_inodes_per_group
-		index = (inode-1)%l_ext2_s_inodes_per_group
-	*/
-
-	xorl %edx, %edx
-	movl $1, %eax
-	movl (l_ext2_s_inodes_per_group), %ecx
-	div %ecx					/* block group = (inode-1)/l_ext2_s_inodes_per_group */
-							/* index = (inode-1)%l_ext2_s_inodes_per_group */
-	movl %eax, %esi					/* esi: block group */	
-	movl %edx, %edi					/* edi: index */
-
-	movl (l_ext2_bgdt_bstart), %eax
-	call ext2_access_block
-	jc .Lsf_err
-
-	movl %eax, %edx					/* blockid addr in cache */
-	movl $(ext2_group_desc), %eax			/* cache block group data */
-	movl $10, %ecx
-	call memcpyw16
-
-	call dbg_ext2_show_bgt_cache	// xxx: dbg
-
-	movl (l_bg_inode_table), %eax
-	call ext2_access_block
-	jc .Lsf_err
-
-	movl %eax, %esi					/* points to the inode table */
-
-	/* fixme: let's try this manually first */
-	
-	/* under inode 2 try to find "boot" */	
-	movzxw (w_ext2_s_inode_size), %ecx
-	leal (%esi,%ecx,1), %edi			/* index: inode -1 */
-
-	movw (%edi), %ax				/* inode2 has to be dir */
-	testw $0x4000, %ax
-	jz .Lsf_err
-
-	/* go through the 12 direct pointers */
-	movl 0x28(%edi), %eax
-	call ext2_access_block
-	jc .Lsf_err
-	movl %eax, %edi				/* edi: directory inode */
-
-	movl $(debug_bootstr), %edx
-	call ext2_search_in_dbp
-	test %eax, %eax
-	jz .Lsf_err
-
-	pushl %eax	/* save eax */
-	movl (l_bg_inode_table), %eax
-        call ext2_access_block
-	pop %eax
-        jc .Lsf_err
-
-	
+	movl $dirnode, %eax
+	movl $64, %edx
+	call dump_mem16
 
 	cli
 	hlt
-
-
-.Lsf_err:
-	movw (debug_sf_err), %ax
-	call puts16
-	stc
-
-.Lsf_end:
-
-	popl %eax // fixme
-
-	popl %ebx
-	popl %edi
-	popl %esi
 	ret
 .endfunc
 
-/* int32_t ext2_search_in_dbp(uint32_t dbp, char* str)
+/* int ext2_access_inode(int inum, struct* inode)
  *
- * return inode location if found, 0 otherwise
 */
-.global ext2_search_in_dbp
-.func ext2_search_in_dbp
-ext2_search_in_dbp:
+.global ext2_access_inode
+.func ext2_access_inode
+ext2_access_inode:
 	pushl %esi
 	pushl %edi
-	pushl %ebx
 	pushl %ebp
+	movl %esp, %ebp
 
-	movl %eax,%edi					/* dbp block */
-	movl %edx,%esi					/* string to find */
+	subl $16, %esp
 
-	movl %edx, %eax					/* do strlen(str) */
-	call strlen16
-	test %eax, %eax
-	movzxw %ax, %ecx
-	jz .Lnotfound					/* don't bother looking for empty strings */
+	movl %eax, %edi						/* save inum for later */
+	movl %edx, %esi						/* save struct* for later */
 
-	xorl %ebx,%ebx					/* cur position within block */
+	/* block group is used as index into int global descriptor table to lookup group's  metadata */
+	dec %eax
+	xorl %edx,%edx
+	movl (l_ext2_sb_inodes_per_group), %ecx			/* block_group = (inum-1) / sb.s_inodes_per_group */
+	div %ecx						/* idx = (inum-1) % sb.s_inodes_per_group */
 
-.Lld_loop:
-	cmpl (l_ext2_s_blocksize), %ebx
-	jge .Lnotfound
+	movl %eax, (%ebp)					/* save block_group */
+	movl %edx, -4(%ebp)					/* save idx */
 
-	movzxw EXT2_DENTRY_OFST_SIZE(%edi), %ebp	/* size of current entry */
-	movzxb EXT2_DENTRY_OFST_NAMELEN(%edi), %edx	/* namelen of the node entry */
-	cmpl %edx, %ecx					/* don't bother to compare if they are not the same len */
-	jne .Ld_loop_next
+	/* compute the block index within given group */
+	movl %edx, %eax						/* eax:  idx */
+	xorl %edx, %edx
+	movl (l_ext2_inodes_per_block), %ecx
+	div %ecx
 
-	leal EXT2_DENTRY_OFST_NAME(%edi), %edx		/* s2: inode entry name */
-	movl %esi, %eax					/* s1: string to find */
-	push %ecx		/* save ecx */
-	call strncmp16
-	pop %ecx		/* restore */
+	movl %eax, -8(%ebp)					/* bix: block index */
+	movl %edx, -12(%ebp)					/* idx2: inode index within block */
+
+	.ifdef DEBUG_VERBOSE
+		pushw %dx
+		pushw -4(%ebp)
+		pushw %ax
+		pushw (%ebp)
+		pushw %di
+		pushw $(ext2_access_inode_msg)		/* ext2_access_inode: inum %d is in block group %d, offset within block: %d, inode index %d, rel index: %d\r\n" */
+		call printf16
+		addw $12, %sp
+	.endif
+
+	movl (%ebp), %eax
+	call ext2_access_gde
+
+	test %ax, %ax
+	jz .Lai_agok
+
+	pushw %ax
+	pushw %di
+	pushw $(ext2_access_inode_msg_err)
+	call printf16
+	addw $4, %sp
+	popw %ax					/* error from ext2_access_gde */
+	jmp .Lai_end
+
+.Lai_agok:
+	movl (l_bg_inode_table), %eax			/* l_bg_inode_table + bix */
+	addl -8(%ebp), %eax
+	call ext2_access_block
 	test %ax,%ax
-	jz .Lfound
+	jnz .Lai_abok
 
-.Ld_loop_next:
-	addl %ebp, %edi
-	addl %ebp, %ebx
-	jmp .Lld_loop
+	xorl %eax,%eax					/* while errno is set i'm not displaying any error here */
+	jmp .Lai_end					/* jump to end */
 
-.Lnotfound:
-	/* not found section */
-	movl $(debug_notfound), %eax
-	call puts16
-	xorl %eax,%eax					/* return 0 */
-	jmp .Lend
+.Lai_abok:
+	/* eax points to the buffer of read inodes, idx2 index it to the correct one */
+	movw (w_ext2_inode_size_floor), %cx		/* use precomputed floor of the inode size */
+	movl -12(%ebp), %edx				/* idx2 */
+	shll %cl, %edx
+	addl %eax, %edx					/* offset to inode I'm looking for */
+	movl %esi, %eax
+	movw (w_ext2_sb_inode_size), %cx
+	call memcpy16
 
-.Lfound:
-	movl EXT2_DENTRY_OFST_INODE(%edi), %eax		/* inode val */
-.Lend:
+.Lai_end:
+	addl $16, %esp
 	popl %ebp
-	popl %ebx
 	popl %edi
 	popl %esi
 	ret
 .endfunc
 
-/* int16_t ext2_access_block(uint32_t blockid)
+/* int ext2_access_gde(int32 bg)
  *
- * check if blockid is in cache. if not block is read from disk. 
+ * access blocks group descriptor by its id
  *
- * CF: set: not in cache
- * otherwise: block address of the block within buffer
+ * return 0 if OK
 */
+.global ext2_access_gde
+.func ext2_access_gde
+ext2_access_gde:
+	pushl %edi
+	pushl %ebx
+
+	movl %eax, %ebx						/* save for later */
+
+	/* compute LBA where the given block group resides: ( block_group*sizeof(ext2_group_desc) ) /512
+	 * reminder is the offset within read sector */
+	xorl %edx,%edx
+	movw $ext2_sz_group_desc, %cx
+	mul %cx
+	movw $SECTORSZ, %cx
+	div %cx
+
+	movl %edx, %edi						/* offset within given LBA */
+	addl (l_ext2_bgdt_lba_start), %eax
+
+        .ifdef DEBUG_VERBOSE
+		pushl %edx
+		pushw %bx
+		pushl %eax
+		pushw $(ext2_dbg_access_gde_msg)
+		call printf16
+		addw $12, %sp
+	.endif
+
+	/* readdisk(LBA where block_group id resides, nr of sectors, buf) */
+	movl $1, %edx
+	movw $readbuf, %cx
+	call ext2_readdisk
+	jc .Lag_end
+
+	/* copy the read entry into ext2_group_desc */
+	addl $readbuf, %edi					/* add offset to the buffer we read blocks in */
+	movl %edi, %edx
+	movw $ext2_sz_group_desc, %cx				/* sizeof(ext2_group_desc) */
+	movw $(ext2_group_desc), %ax				/* ext2_group_desc */
+	call memcpy16
+	xorl %eax, %eax
+.Lag_end:
+	popl %ebx
+	popl %edi
+	ret
+.endfunc
+
+
+/* char* access_block(unsigned int blockid)
+ *
+ * reads the block of given id. if cache is used check block cache first.
+ *
+ * returns address of a block when read is successfull.
+ * NULL otherwise
+*/
+.global ext2_access_block
 .func ext2_access_block
 ext2_access_block:
-	pushl %esi
-	movl %eax, %esi					/* save blockid */
-
-	pushl %eax
-	pushw $(debug_blkid)
-	call printf16
-	addw $6, %sp
-	movl %esi, %eax
-
-	call ext2_block_in_cache			/* check cache first */
-	jnc .Lab_end
-
-	/* cache miss */
 	.ifdef DEBUG_VERBOSE
-		pushl %esi
-		pushw $(debug_notincache)
+		pushl %eax
+		pushw $(ext2_dbg_access_block_msg)
+		call printf16
+		addw $2, %sp
+		popl %eax				/* restore eax */
+	.endif
+
+	movl (l_ext2_sb_blocks_count), %edx
+	cmpl %edx, %eax
+	ja .Lab_oor					/* block out of range */
+
+	incl (l_bc_total)				/* increase stat counters */
+
+	cmpw  $0, (w_bc_valid_cache)
+	jz .Lab_doread
+
+	// TODO: handle cache
+	jmp .Ltmp1
+		tmpnocache: .asciz "bcache not yet implemented\r\n"
+	.Ltmp1:
+		pushl %eax
+		movw $(tmpnocache), %ax
+		call puts16
+		popl %eax
+
+
+.Lab_doread:
+	/* LBA to seek to: ext2_LBA_start + blkid * block_size_in_sectors */
+	movl %eax, (l_bc_block_start)
+
+	xorl %edx,%edx
+	movzxw (w_ext2_blocksize_in_sectors), %ecx
+	mull %ecx
+	addl (q_part_lba_start), %eax
+	movl %eax, (q_dap_start)
+
+	movw $SECTORS_IN_BUF, (w_dap_sectors)
+	movw $bcbuf, (w_dap_buf)
+
+	.ifdef DEBUG_VERBOSE
+		pushl %eax
+		pushw $(ext2_access_block_lba)
 		call printf16
 		addw $6, %sp
 	.endif
 
-	movl %esi, %eax					/* read the block */
-	call ext2_readblock
-	jnz .Lab_end					/* eax has address of the block if CF is not set */
+        leaw (lba_dap), %dx
+        movw (w_bp_disk), %ax
+        call diskread16					/* errno16 and ax set in case of an error */
 
-	stc						/* set CF to indicate error */
-.Lab_end:
-	pop %esi
-	ret
-.endfunc
+	test %ax, %ax
+	jz .Lab_readok
+	xor %eax, %eax
+	jmp .Lab_end
 
+.Lab_readok:
 
+	setae (w_bc_valid_cache)
 
-/* void* ext2_block_in_cache(uint32_t blockid)
- *
- * checks if blockid is in blockcache. 
- *
- * CF: set: not in cache
- * otherwise: block address of the block within buffer
-*/
-.global ext2_block_in_cache
-.func ext2_block_in_cache
-ext2_block_in_cache:
-	pushl %esi
-	pushl %edi
+	/* XXX: right now we don't have cache so we return the buf address */
+	movl $bcbuf, %eax
+	jmp .Lab_end
 
-	incl (l_bc_total)				/* statistics update */
-
-	movl %eax, %esi					/* blockid */
-	movl (l_bc_block_start), %edi
-	subl %edi, %eax					/* prepare offset to buffer: blockid-l_bc_block_start */
-							/* valid only if CF is not set in the end */
-	cmpl %edi, %esi					/* cache miss if blockid < l_bc_block_start */
-	jb .Lbic_err
-
-	addl (l_bc_block_capacity), %edi
-	cmpl %edi, %esi
-	jge .Lbic_err					/* cache miss if blockid >= l_bc_block_start+l_bc_block_capacity */
-
-	/* we have index within block cache in eax */
-	movl $(w_bc_offsets), %edx			/* offsets in buffer cache */
-	leal (%edx,%eax,2), %edx			/* index into the cache */
-	movzxw (%edx), %eax				/* read the offset */
-	addw (w_bc_addr), %ax				/* and add to the start of the buffer; address can't be >1MB so this is ok */
-
-	incl (l_bc_hits)				/* update cache hit */
-	clc						/* clear CF */
-	jmp .Lbic_end 
-.Lbic_err:
-	stc						/* set CF on error */
-.Lbic_end:
-	popl %edi
-	popl %esi
-	ret
-.endfunc
-
-/* void* ext2_readblock(uint32_t blockid)
- *
- * Reads blockid into buffer cache. Buffer is filled from blockid if possible.
- * It's always possible to fill up a buffer cache with blocks.
- *
- * CF set in case of an error
- * otherwise: block address of the block within buffer
-*/
-.func ext2_readblock
-ext2_readblock:
-	pushl %esi
-	pushl %edi
-	movl %eax,%esi					/* save blockid */
-	movl %eax,%edi
-
-	/* blockid range checks */
-	movl (l_ext2_s_total_blocks), %edx
-	cmpl %edx, %eax
-	jge .Lrb_err					/* blockid < l_ext2_s_total_blocks */
-
-	addl (l_bc_block_capacity), %eax		/* blockid + l_bc_block_capacity  < l_ext2_s_total_blocks */
-	cmpl %edx, %eax
-	jb .Lrb_calcsec
-
-	movl %edx, %esi
-	subl (l_bc_block_capacity), %esi		/* startblock: l_ext2_s_total_blocks - l_bc_block_capacity */
-
-.Lrb_calcsec:
-	subl %esi, %edi					/* position in buffer */
-	movl %esi, %eax					/* start blockid */
-	movzxw (w_ext2_blocksize_in_sectors), %ecx
-	mul %ecx					/* offset, sectors within partition */
-
-	addl (q_bp_lba_start), %eax			/* lba_start + blockid * w_ext2_blocksize_in_sectors */
-	movl %eax, (q_dap_start)
-	call ext2_read	
-
-	test %ax,%ax					/* return in case of an error */
-	jnz .Lrb_end
-
-	pushl %esi
-	pushw $(debug_rblock)
+.Lab_oor:
+	/* blockid out of range */
+	pushl %edx
+	pushl %eax
+	pushw $(ext2_access_block_oor)
 	call printf16
-	addw $6, %sp
-
-	movl %esi, (l_bc_block_start)			/* update the cache information */
-
-	/* calculate the buffer addr of the blockid */
-	movl $(w_bc_offsets), %edx			/* offsets in buffer cache */
-	leal (%edx,%edi,2), %edx			/* index into the cache */
-	movzxw (%edx), %eax				/* read the offset */
-	addw (w_bc_addr), %ax				/* and add to the start of the buffer; address can't be >1MB so this is ok */
-
-	clc
-	jmp .Lrb_end
-
-.Lrb_err:
+	addw $10, %sp
 	xorl %eax,%eax
-	stc						/* indicate error with CF */
-.Lrb_end:
-	pop %edi
-	pop %esi
+.Lab_end:
 	ret
 .endfunc
 
-/* int8_t ext2_read()
+
+/* int8_t ext2_readdisk(int lba, int blocks, char* buf)
  *
- * Wrapper function around read16() from libsa16. Expects dap to be set already.
+ * reads the blocks from lba into buf. buf has to have space to read the data
+ *
  * CF indicates error, errno16 is set. Otherwise returns 0.
 */
-.func ext2_read
-ext2_read:
+.func ext2_readdisk
+ext2_readdisk:
+	movw %cx, (w_dap_buf)
+	movw %dx, (w_dap_sectors)
+	movl %eax, (q_dap_start)
+
 	.ifdef DEBUG_VERBOSE
 		.if DEBUG_VERBOSE > 1
 			pushw (w_dap_sectors)
 			pushl (q_dap_start)
 			pushw (w_dap_buf)
-			pushw $(dbgmsg_ext2_readstats)
+			pushw $(dbgmsg_ext2_readdiskstats)
 			call printf16
 			addw $10, %sp
 		.endif
 	.endif
 	leaw (lba_dap), %dx
 	movw (w_bp_disk), %ax
-	call read16					/* errno16 and ax set in case of an error */
+	call diskread16					/* errno16 and ax set in case of an error */
 	ret
 .endfunc
 
@@ -653,7 +621,7 @@ dbg_ext2_show_dap:
 dbg_ext2_show_blockcache:
 	pushl (l_bc_block_capacity)
 	pushl (l_bc_block_start)
-	pushw (w_bc_addr)
+	pushw (w_bc_bufaddr)
 	pushw $(ext2_dbg_blockcache)
 	call printf16
 	addw $12, %sp
@@ -664,8 +632,8 @@ dbg_ext2_show_blockcache:
 .func dbg_ext2_show_partition
 dbg_ext2_show_partition:
 	pushw (w_bp_disk)
-	pushl (q_bp_lba_end)
-	pushl (q_bp_lba_start)
+	pushl (q_part_lba_end)
+	pushl (q_part_lba_start)
 	pushw $(ext2_dbg_bootpartition)
 	call printf16
 	addw $12, %sp
@@ -675,17 +643,18 @@ dbg_ext2_show_partition:
 .global dbg_ext2_show_superblock
 .func dbg_ext2_show_superblock
 dbg_ext2_show_superblock:
+	pushl (l_ext2_bgdt_lba_start)
 	pushl (l_ext2_bgdt_bstart)
-	pushw (w_ext2_s_inode_size)
-	pushl (l_ext2_s_rev_level)
-	pushl (l_ext2_s_inodes_per_group)
-	pushl (l_ext2_s_blocks_per_group)
-	pushl (l_ext2_s_total_blocks)
+	pushw (w_ext2_sb_inode_size)
+	pushl (l_ext2_sb_rev_level)
+	pushl (l_ext2_sb_inodes_per_group)
+	pushl (l_ext2_sb_blocks_per_group)
+	pushl (l_ext2_sb_blocks_count)
 	pushw (w_ext2_blocksize_in_sectors)
-	pushl (l_ext2_s_blocksize)
+	pushl (l_ext2_sb_blocksize)
 	pushw $(ext2_dbg_superblock)
 	call printf16
-	addw $30, %sp
+	addw $34, %sp
 	ret
 .endfunc
 
@@ -705,24 +674,50 @@ dbg_ext2_show_bgt_cache:
 .endfunc
 
 .section .data
-
         .align 8
-		lba_dap:
+	ext2_partition:
+		q_part_lba_start:	.quad 0
+		q_part_lba_end:		.quad 0
+		w_bp_disk:		.word 0
+
+
+	// XXX: can't have one DAP being used for different purposes, aka bufread..
+	lba_dap:
 				.byte 0x10	/* size of the packet */
 				.byte 0		/* reserved */
 		w_dap_sectors:	.word 0		/* how many LBAs to read */
 		w_dap_buf:	.word 0,0	/* adress to read into */
 		q_dap_start:	.quad 0		/* LBA */
 
+	/* block cache */
 	ext2_blockcache:
 		l_bc_block_start:	.long 0		/* blockid start in buf */
 		l_bc_block_capacity:	.long 0		/* buffer capacity in blocks */
-		w_bc_addr:		.word 0		/* buf addr */
+		w_bc_valid_cache:	.word 0		/* state of the cahce: 0: invalid, anything else: ok */
+		w_bc_bufaddr:		.word bcbuf	/* buf addr */
 		w_bc_offsets:		.word 0,0,0,0	/* precalculated offsets */
 		l_bc_hits:		.long 0		/* cache hits */
 		l_bc_total:		.long 0		/* total rq */
-		
+		l_bc_phys_ofst:		.long 0		/* physical offset into the disk where cache begins */
 
+
+	.align 4
+	/* excert from superblock structure ext2_super_block */
+	l_ext2_sb_blocksize:		.long 0
+	l_ext2_sb_blocks_count:		.long 0
+	l_ext2_sb_blocks_per_group:	.long 0
+	l_ext2_sb_inodes_per_group:	.long 0
+	l_ext2_sb_rev_level:		.long 0
+	w_ext2_sb_inode_size:		.word 0
+
+	/* superblock related variables to speed up calculations */
+	l_ext2_bgdt_bstart:		.long 0		/* block group descriptor start */
+	w_ext2_blocksize_in_sectors:	.word 0		/* how many sectors (LBA) blocksize spreads on */
+	l_ext2_bgdt_lba_start:		.long 0		/* LBA where global group descriptor starts */
+	l_ext2_inodes_per_block:	.long 0		/* how many inodes are there per block */
+	w_ext2_inode_size_floor:	.word 0		/* inode size has to be power of 2; floor of that number */
+
+	/* struct ext2_group_desc */
 	.align 4
 	ext2_group_desc:				/* cache for block group descriptor entry */
 		l_bg_block_bitmap:	.long 0
@@ -733,33 +728,29 @@ dbg_ext2_show_bgt_cache:
 		w_bg_used_dirs_count:	.word 0
 		w_bg_flags:		.word 0
 		.gd_pad:		.long 0,0,0	/* not used here but space kept so the struct is 32B */
+	ext2_sz_group_desc = . - ext2_group_desc	/* keep the sizeof(ext2_group_desc) */
 
 
-	ext2_partition:
-		q_bp_lba_start:	.quad 0
-		q_bp_lba_end:	.quad 0
-		w_bp_disk:	.word 0
 
-	w_ext2_blocksize_in_sectors:	.word 0		/* how many sectors blocksize spreads on */
+	/* ext2_init_module() */
+	ext2_init_part_toobig:		.asciz	"ext2: partition spreads beyond 32b lba, unsupported by this driver.\r\n"
+	ext2_init_nomagic:		.asciz	"ext2: no magic signature found.\r\n"
+	ext2_init_bsize_unsupported:	.asciz	"ext2: unsupported block size: %d\r\n"
+	ext2_init_fs_state_unclean:	.asciz	"ext2: warning: filesystem was not unmounted properly.\r\n" 
+	ext2_init_fs_state_okenough:	.asciz	"ext2: ok to proceed anyway, error handling code: %d\r\n"
 
-	/* superblock variables */
-	.align 4
-	l_ext2_bgdt_bstart:		.long 0		/* block group descriptor start */
+	/* ext2_access_block() */
+	ext2_dbg_access_block_msg:	.asciz	"ext2_access_block: blkid: 0x%lx\r\n"
+	ext2_access_block_oor:		.asciz	"oops: ext2_access_block: block 0x%lx out of range (0x%lx)\r\n"
+	ext2_access_block_lba:		.asciz	"ext2_access_block: accessing LBA 0x%lx\r\n"
 
-	l_ext2_s_blocksize:		.long 0	
-	l_ext2_s_total_blocks:		.long 0
-	l_ext2_s_blocks_per_group:	.long 0
-	l_ext2_s_inodes_per_group:	.long 0
-	l_ext2_s_rev_level:		.long 0
-	w_ext2_s_inode_size:		.word 0
+	/* ext2_ext2_access_gde() */
+	ext2_dbg_access_gde_msg:	.asciz	"ext2_access_gde: LBA: 0x%lx, blockgroup: %d, offset: 0x%lx\r\n"
 
-	ext2_partition_toobig:	.asciz	"ext2: partition spreads beyond 32b lba, unsupported by this driver.\r\n"
-	ext2_read_failed:	.asciz	"ext2_read: read failure: %x\r\n"
-	ext2_no_magic:		.asciz	"ext2: no magic signature found.\r\n"
-	ext2_bs_unsupported:	.asciz	"ext2: unsupported block size: %d\r\n"
+	/* ext2_access_inode() */
+	ext2_access_inode_msg:		.asciz	"ext2_access_inode: inum %d is in block group %d, offset within block: %d, inode index %d, rel index: %d\r\n"
+	ext2_access_inode_msg_err:	.asciz	"ext2_access_inode: failed to access group descriptor entry for inum: %d\r\n"
 
-	ext2_fs_state_unclean:	.asciz	"ext2: warning: filesystem was not unmounted properly.\r\n" 
-	ext2_fs_state_okenough:	.asciz	"ext2: ok to proceed anyway, error handling code: %d\r\n"
 
 	/* debug strings */
 	ext2_dbg_msg_start:		.asciz	"\r\n-- ext2 dump of variables --\r\n"
@@ -775,7 +766,9 @@ dbg_ext2_show_bgt_cache:
 					.ascii	"  inodes per group:\t0x%lx\r\n"
 					.ascii	"  revision level:\t0x%lx\r\n"
 					.ascii	"  node size:\t\t0x%x\r\n"
-					.asciz	"  block GDT:\t\t0x%lx\r\n"
+					.ascii	"  block GDT:\t\t0x%lx\r\n"
+					.asciz	"  LBA GDT:\t\t\t0x%lx\r\n"
+
 	ext2_dbg_msg_end:		.asciz	"-- end of ext2 dump --\r\n"
 
 	dbg_show_bgtcache:	.ascii	"gdt cache:\r\n"
@@ -786,24 +779,25 @@ dbg_ext2_show_bgt_cache:
 				.ascii	"  free inodes: %d\r\n"
 				.asciz	"  used dirs: %d\r\n"
 
-	debug_delim:	.asciz "/"
-	debug_strtok:	.asciz	"str: >%s<\r\n"
-	debug_done:	.asciz	"out of loop\r\n"
-	debug_notincache:	.asciz	"block %d not in cache.\r\n"
-	debug_sf_err:	.asciz	"search_file: error\r\n"
-	debug_blkid:	.asciz	"access_block: blockid: 0x%lx\r\n"
-	debug_rblock:	.asciz	"ext2_readblock: start cache: 0x%lx\r\n"
-	debug_bic:	.asciz	"ext2_block_in_cache: hello\r\n"
-
-	debug_inode_entry:	.asciz	"inode: 0x%lx\t"
-	debug_nl:	.asciz "\r\n"	
-	debug_valx:	.asciz	"val: %x\r\n"
-
 	.ifdef DEBUG_VERBOSE
-		dbgmsg_ext2_readstats:	.asciz	"ext2_read: buf: 0x%x, LBA: 0x%lx, sectors: %d\r\n"
+		dbgmsg_ext2_readdiskstats:	.asciz	"ext2_readdisk: buf: 0x%x, LBA: 0x%lx, sectors: %d\r\n"
 	.endif
 
+	showbufaddr: .asciz	"bcbuf: %x, readbuf: %x\r\n"
 
-	debug_bootstr:		.asciz	"boot"
-	debug_kernelstr:	.asciz	"kernel"
-	debug_notfound:		.asciz	"not found.\r\n"
+.section .bss
+	.align 4
+	/* buffer allocated for block cache */
+	.global bcbuf
+	bcbuf:		.skip	BUFSZ
+
+	/* generic buffer reserved for read operation */
+	.global readbuf
+	readbuf:	.skip	BUFSZ
+
+	// XXX: is this how we want to do this ?
+	.global inode
+	inode:	.skip	2*EXT2_DEFAULT_INODE_SIZE
+
+	.global dirnode
+	dirnode:.skip	2*EXT2_DEFAULT_INODE_SIZE
