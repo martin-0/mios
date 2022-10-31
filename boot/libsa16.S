@@ -459,6 +459,30 @@ memcmp16:
 	ret
 .endfunc
 
+/* void memcpy16(void *dst, void* src, uint16_t bytes)
+ *
+ * copy n bytes from source to destination.
+*/
+.global memcpy16
+.func memcpy16
+memcpy16:
+	pushw %si
+	pushw %di
+
+	movw %ax, %di
+	movw %dx, %si				/* cx is already set */
+
+.Lmemcpy:
+	lodsb
+	stosb
+	loop .Lmemcpy
+
+	movw %dx, %ax				/* ret ptr to dst */
+	pop %di
+	pop %si
+	ret
+.endfunc
+
 
 /* void memcpyw16(void *dst, void* src, uint16_t n-words)
  *
@@ -1048,6 +1072,58 @@ dump_mem16:
 	ret
 .endfunc
 
+/* void dump_mem16_32(void* addr, int16_t nblocks)
+ *
+ * Dump nblocks dwords of addr */
+.global dump_mem16_32
+.func dump_mem16_32
+dump_mem16_32:
+	push %si
+	push %di
+	push %bx
+
+	movzxw %ax, %esi			/* addr */
+	movw %dx, %di				/* blocks */
+	xorl %ebx, %ebx				/* counter */
+
+	pushl %esi
+	pushw $(dump_mem_addr_32)
+	call printf16
+
+.Ldump_loop32:
+	movl (%esi), %eax			/* can't use lods */
+	addl $4, %esi
+	pushl %eax
+	pushw $(dump_mem_val_32)
+	call printf16
+	addw $6, %sp
+
+	inc %bx
+	cmpw %bx, %di
+	jbe .Ldumpmem_end32
+
+	testw $3, %bx
+	jnz .Ldump_loop32
+	pushl %esi
+	pushw $(dump_mem_addrnl_32)
+	call printf16
+	addw $6, %sp
+
+.Ldumpmem32.1:
+	jmp .Ldump_loop32
+
+.Ldumpmem_end32:
+	pushl %esi
+	pushw $(dump_mem_addr_end_32)
+	call printf16
+	addw $12, %sp
+
+	pop %bx
+	pop %di
+	pop %si
+	ret
+.endfunc
+
 /* -============================-
  *                              *
  *	basic I/O functions	*
@@ -1055,10 +1131,10 @@ dump_mem16:
  * -============================-
 */
 
-/* int16_t read16(int16_t disk, struct lba_dap_t* dap) */
-.global read16
-.func read16
-read16:
+/* int16_t diskread16(int16_t disk, struct lba_dap_t* dap) */
+.global diskread16
+.func diskread16
+diskread16:
 	pushw %si
 
 	movw %dx, %si				/* dap */
@@ -1167,9 +1243,15 @@ diskinfo16:
 	.endif
 
 	dump_mem_addr:		.asciz	"0x%x\t"
+	dump_mem_addr_32:	.asciz	"0x%lx\t"
+
 	dump_mem_addrnl:	.asciz	"\r\n0x%x\t"
+	dump_mem_addrnl_32:	.asciz	"\r\n0x%lx\t"
+
 	dump_mem_addr_end:	.asciz	"\r\n0x%x\r\n"
+	dump_mem_addr_end_32:	.asciz	"\r\n0x%lx\r\n"
 	dump_mem_val:		.asciz	"\t%p"
+	dump_mem_val_32:	.asciz	"\t0x%lx"
 
 	.global errno16
 	errno16:	.byte 0
