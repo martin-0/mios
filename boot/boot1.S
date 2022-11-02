@@ -309,12 +309,13 @@ _start:
 		call printf16
 	.endif
 
+	//dbg_show_addr .Lhintex
+	dbg_show_addr .Lsden_found
+	nop
+	nop
+
 	movl $(boot_partition), %eax			/* initialize ext2 module */
 	call ext2_initmod				/* int16_t ext2_initmod(boot_partition *bp) */
-
-	dbg_show_addr .Lhint1
-	nop
-	nop
 
 	movw $(strkernel), %ax
 	call ext2_search_file				/* ext2_search_file("/boot/kernel") */
@@ -536,3 +537,5 @@ panic16:
 	.endif
 
 	debug_info_halt:	.asciz	"info: system halted for now.\r\n"
+
+	debug_xxx_test:	.asciz	"this is %x, this is %lx\r\n"

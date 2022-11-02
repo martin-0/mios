@@ -48,6 +48,12 @@
 	.set ENOINOPG, 8
 	.set EBLKINODE, 9
 
+	.set INODE_OFST_DBP_0, 0x28			/* offset to inode's direct block pointer 0 */
+
+	/* inode mode */
+	.set S_IFMT, 0xF000				/* mask to be used for inode.i_mode */
+	.set S_IFDIR, 0x4000				/* inode is a directory */
+
 .section .text
 	.code16
 
@@ -185,18 +191,6 @@ ext2_initmod:
 .Lcapok:
 	movl %edx, (l_bc_block_capacity)
 
-	// TODO: drop this maybe
-
-	/* precalculate offsets into cache */
-	movl %edx, %ecx					/* block capacity */			
-	movl $(w_bc_offsets), %edi			/* start of the offsets */
-	xorl %eax,%eax
-	movl (l_ext2_sb_blocksize), %edx		/* block size */
-.Lsetoffsts:
-	stosw
-	addw %dx, %ax
-	loop .Lsetoffsts
-
 .Lnodesz:
 	movl EXT2_SB_OSFT_REV_LEVEL(%si), %eax		/* check the revision version, i.e. major version */
 	movl %eax, (l_ext2_sb_rev_level)
@@ -317,9 +311,29 @@ ext2_search_file:
 	movl $2, %eax
 	call ext2_access_inode
 
-	//call dbg_ext2_show_bgt_cache
+	jmp .Ltmp2
+		tmp2str: .asciz "boot"
+		tmp3str: .asciz "kernel"
+	.Ltmp2:
+	movw $(tmp2str), %dx
+	movw $(dirnode), %ax
+	call ext2_search_dir_entry
 
-	movl $dirnode, %eax
+	movl $(dirnode), %edx
+	call ext2_access_inode
+
+	movw $(tmp3str), %dx
+	movw $(dirnode), %ax
+	call ext2_search_dir_entry
+
+	movw $(inode), %dx
+	call ext2_access_inode
+
+	movl $(inode), %ebx
+	movl INODE_OFST_DBP_0(%edx), %eax		/* block0 of ELF */
+	call ext2_access_block
+
+	movw $bcbuf, %ax
 	movl $64, %edx
 	call dump_mem16
 
@@ -328,8 +342,176 @@ ext2_search_file:
 	ret
 .endfunc
 
+
+/* int ext2_search_dir_entry(struct* inode, char* matchstr)
+ *
+ * returns inode of matchstr
+ * returns 0 if matchstr not found
+*/
+.global ext2_search_dir_entry
+.func ext2_search_dir_entry
+ext2_search_dir_entry:
+	pushl %ebx
+	pushl %esi
+	pushl %edi
+	pushl %ebp
+	movl %esp, %ebp
+	subl $20, %esp
+
+	movl %edx, %edi					/* save match str */
+	movw $0, (%ebp)					/* i variable */
+
+	.ifdef DEBUG_VERBOSE
+		pushl %eax
+		pushl %edx
+		pushw $(ext2_search_dir_entry_msg)
+		call printf16
+		addw $2, %sp
+		popl %edx
+		popl %eax
+	.endif
+
+	/* check if the inode is directory */
+	movl %eax, %esi
+	movw (%esi), %ax
+	andw $S_IFMT, %ax
+	cmpw $S_IFDIR, %ax
+	je .Lsde_isdir
+
+	/* can't proceed with inode is not a directory */
+	movw $(ext2_search_dir_entry_err), %ax
+	call puts16
+	xorl %eax, %eax
+	jmp .Lsde_end
+
+.Lsde_isdir:
+	movl %esi, %ebx					/* start of direct block pointer */
+	addl $INODE_OFST_DBP_0, %ebx
+
+.Lsde_search_blocks:
+	/* loop all 12 block entries */
+	movl (%ebx), %eax				/* block id */
+	call ext2_access_block
+	test %ax, %ax
+	jnz .Lsde_search_blocks.abok
+
+	pushl (%ebx)					/* display error and return 0 */
+	pushw $(ext2_search_dir_entry_err2)
+	call printf16
+	addw $6, %sp
+
+	xorl %eax, %eax
+	jmp .Lsde_end
+
+.Lsde_search_blocks.abok:
+	/* eax points to the bufcache location */
+	movl %edi, %edx
+	call ext2_search_dir_entry_nohash
+	test %eax, %eax
+	jnz .Lsde_end					/* we found the inode, it's in ax, return */
+
+	/* keep looking */
+	addl $4, %ebx
+	incw (%ebp)					/* i variable */
+	cmpw $12, (%ebp)
+	jb .Lsde_search_blocks
+
+.Lsde_end:
+	addl $20, %esp
+	popl %ebp
+	popl %edi
+	popl %esi
+	popl %ebx
+	ret
+.endfunc
+
+/* int ext2_search_dir_entry_nohash(char* buf, char* matchstr)
+ *
+ * search the directory entry, ignore hash tree if it exists
+ * returns inode for matchstr if found, 0 otherwise
+ */
+.global ext2_search_dir_entry_nohash
+.func ext2_search_dir_entry_nohash
+ext2_search_dir_entry_nohash:
+	/* we have a buffer pointing to a block cache full of directory entries */
+	pushl %esi
+	pushl %edi
+	pushl %ebx
+
+	movl %eax, %esi
+	movl %edx, %edi
+
+	movl %edx, %eax			/* XXX: do I need it? maybe it's faster to do a cmp on strign size and than call strmp ? */
+	call strlen16
+	movl %eax, %ebx			/* matchstr len */
+	xorl %ebx, %ebx			/* csize */
+
+.Lsden_mainloop:
+	cmpl %ebx,(l_ext2_sb_blocksize)
+	jb .Lsden_nofound
+
+	/* to avoid infinite look check the size of the direntry */
+	cmpl $0, 4(%esi,%ebx)					/* it can't be 0 */
+	jnz .Lsden_mainloop_csizeok
+
+	movw $(ext2_search_dir_entry_nohash_err), %ax
+	call puts16
+	jmp .Lsden_nofound
+
+.Lsden_mainloop_csizeok:
+	movzxb 6(%esi,%ebx), %cx				/* dir len */
+	movw %di, %dx
+	leaw 8(%esi,%ebx), %ax
+
+	.ifdef DEBUG_VERBOSE
+		pushw %ax
+		pushw $(ext2_search_dir_entry_nohash_debug)
+		call printf16
+		addw $2, %sp
+		popw %ax
+	.endif
+
+	call strncmp16
+	test %ax,%ax
+	jz .Lsden_found
+
+.Lsden_keepgoing:
+	addw 4(%esi,%ebx), %bx
+	jmp .Lsden_mainloop
+
+	/* TODO: indirect block access required */
+
+	jmp .Lsden_nofound
+
+.global .Lsden_found
+.Lsden_found:
+	movl (%esi,%ebx), %eax					/* inode */
+
+	.ifdef DEBUG_VERBOSE
+		pushl %eax
+		pushl %eax
+		pushw %di
+		pushw $(ext2_search_dir_entry_nohash_found)
+		call printf16
+		addw $8, %sp
+		popl %eax
+	.endif
+
+	jmp .Lsden_end
+.Lsden_nofound:
+	xorl %eax,%eax
+
+.Lsden_end:
+	popl %ebx
+	popl %edi
+	popl %esi
+	ret
+.endfunc
+
+
 /* int ext2_access_inode(int inum, struct* inode)
  *
+ * copies inode structure when upon successfull success, returns 0
 */
 .global ext2_access_inode
 .func ext2_access_inode
@@ -368,7 +550,7 @@ ext2_access_inode:
 		pushw %ax
 		pushw (%ebp)
 		pushw %di
-		pushw $(ext2_access_inode_msg)		/* ext2_access_inode: inum %d is in block group %d, offset within block: %d, inode index %d, rel index: %d\r\n" */
+		pushw $(ext2_access_inode_msg)
 		call printf16
 		addw $12, %sp
 	.endif
@@ -398,7 +580,7 @@ ext2_access_inode:
 	jmp .Lai_end					/* jump to end */
 
 .Lai_abok:
-	/* eax points to the buffer of read inodes, idx2 index it to the correct one */
+	/* eax points to the buffer of read inodes, idx2 indexes it to the correct one */
 	movw (w_ext2_inode_size_floor), %cx		/* use precomputed floor of the inode size */
 	movl -12(%ebp), %edx				/* idx2 */
 	shll %cl, %edx
@@ -496,6 +678,7 @@ ext2_access_block:
 	cmpw  $0, (w_bc_valid_cache)
 	jz .Lab_doread
 
+/*
 	// TODO: handle cache
 	jmp .Ltmp1
 		tmpnocache: .asciz "bcache not yet implemented\r\n"
@@ -504,6 +687,7 @@ ext2_access_block:
 		movw $(tmpnocache), %ax
 		call puts16
 		popl %eax
+	*/
 
 
 .Lab_doread:
@@ -680,8 +864,6 @@ dbg_ext2_show_bgt_cache:
 		q_part_lba_end:		.quad 0
 		w_bp_disk:		.word 0
 
-
-	// XXX: can't have one DAP being used for different purposes, aka bufread..
 	lba_dap:
 				.byte 0x10	/* size of the packet */
 				.byte 0		/* reserved */
@@ -695,7 +877,6 @@ dbg_ext2_show_bgt_cache:
 		l_bc_block_capacity:	.long 0		/* buffer capacity in blocks */
 		w_bc_valid_cache:	.word 0		/* state of the cahce: 0: invalid, anything else: ok */
 		w_bc_bufaddr:		.word bcbuf	/* buf addr */
-		w_bc_offsets:		.word 0,0,0,0	/* precalculated offsets */
 		l_bc_hits:		.long 0		/* cache hits */
 		l_bc_total:		.long 0		/* total rq */
 		l_bc_phys_ofst:		.long 0		/* physical offset into the disk where cache begins */
@@ -751,6 +932,15 @@ dbg_ext2_show_bgt_cache:
 	ext2_access_inode_msg:		.asciz	"ext2_access_inode: inum %d is in block group %d, offset within block: %d, inode index %d, rel index: %d\r\n"
 	ext2_access_inode_msg_err:	.asciz	"ext2_access_inode: failed to access group descriptor entry for inum: %d\r\n"
 
+	/* ext2_search_dir_entry() */
+	ext2_search_dir_entry_msg:	.asciz	"ext2_search_dir_entry: search for %s\r\n"
+	ext2_search_dir_entry_err:	.asciz	"ext2_search_dir_entry: inode not a directory\r\n"
+	ext2_search_dir_entry_err2:	.asciz	"ext2_search_dir_entry: failed to access block 0x%lx\r\n"
+
+	/* ext2_search_dir_entry_nohash() */
+	ext2_search_dir_entry_nohash_err:	.asciz	"ext2_search_dir_entry_nohash: oops: dir entry size is 0\r\n"
+	ext2_search_dir_entry_nohash_found:	.asciz	"ext2_search_dir_entry_nohash: %s found: inode: 0x%lx\r\n"
+	ext2_search_dir_entry_nohash_debug:	.asciz	"ext2_search_dir_entry_nohash: comparing: %s\r\n"
 
 	/* debug strings */
 	ext2_dbg_msg_start:		.asciz	"\r\n-- ext2 dump of variables --\r\n"
