@@ -295,7 +295,7 @@ int search_dir_entry(int fd, struct ext2_inode* inode, bbuf_t* bbuf, char* match
 		printf("search_dir: looking for %s\n", matchstr);
 	#endif
 
-	if (!(inode->i_mode & 0x4000)) {
+	if (! S_ISDIR(inode->i_mode)) {
 		printf("search_dir_entry: not a dir inode\n");
 		#ifdef PANIC_IF_ERR
 			dump_memory((int*)inode, 128);
