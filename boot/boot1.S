@@ -1,9 +1,8 @@
 /* martin */
 	.set BUFADDR, 0x5000
-	.set PAGE_SIZE, 0x1000				//  \  intentionally set to the same size
-	.set BUFSZ, 0x1000				//  /
-
-	.set STACK_OFFST, 0x4ffc
+	.set PAGE_SIZE, 0x1000
+	.set BUFSZ, 0x1000
+	.set STACK_OFFST, 0x1ffc
 
 .section .text
 	.code16
@@ -34,7 +33,6 @@ _start:
 	movw $STACK_OFFST, %sp
 
 	movw %dx, (bp_bootdrive)		/* save bootdrive */
-
 	movw $(msg_boot1), %ax
 	call puts16
 
@@ -310,7 +308,7 @@ _start:
 	.endif
 
 	//dbg_show_addr .Lhintex
-	dbg_show_addr .Lsden_found
+	dbg_show_addr .Lgbdt_lba
 	nop
 	nop
 
