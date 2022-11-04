@@ -85,6 +85,8 @@ typedef struct bbuf {
 	char buf[BUFSZ];
 } bbuf_t;
 
+bbuf_t bbuf;
+
 struct ext2_super_block	sb;
 struct ext2_group_desc gde;
 
@@ -148,7 +150,6 @@ int main(int argc, char** argv) {
 	show_sblock();
 
 	struct ext2_inode inode, dirnode;
-	bbuf_t bbuf;
 	init_bbuf(&bbuf);
 	int inum = 0;
 
@@ -184,6 +185,7 @@ int main(int argc, char** argv) {
 			token = strtok_r(pathbuf, "/", &ntoken);
 			continue;
 		}
+		show_gde(&gde,1);
 
 		// assumes we have directory opened and referenced by inode
 		if ((inum = search_dir_entry(fd, &dirnode, &bbuf, token)) == 0) {
