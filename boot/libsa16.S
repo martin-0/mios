@@ -1072,58 +1072,6 @@ dump_mem16:
 	ret
 .endfunc
 
-/* void dump_mem16_32(void* addr, int16_t nblocks)
- *
- * Dump nblocks dwords of addr */
-.global dump_mem16_32
-.func dump_mem16_32
-dump_mem16_32:
-	push %si
-	push %di
-	push %bx
-
-	movzxw %ax, %esi			/* addr */
-	movw %dx, %di				/* blocks */
-	xorl %ebx, %ebx				/* counter */
-
-	pushl %esi
-	pushw $(dump_mem_addr_32)
-	call printf16
-
-.Ldump_loop32:
-	movl (%esi), %eax			/* can't use lods */
-	addl $4, %esi
-	pushl %eax
-	pushw $(dump_mem_val_32)
-	call printf16
-	addw $6, %sp
-
-	inc %bx
-	cmpw %bx, %di
-	jbe .Ldumpmem_end32
-
-	testw $3, %bx
-	jnz .Ldump_loop32
-	pushl %esi
-	pushw $(dump_mem_addrnl_32)
-	call printf16
-	addw $6, %sp
-
-.Ldumpmem32.1:
-	jmp .Ldump_loop32
-
-.Ldumpmem_end32:
-	pushl %esi
-	pushw $(dump_mem_addr_end_32)
-	call printf16
-	addw $12, %sp
-
-	pop %bx
-	pop %di
-	pop %si
-	ret
-.endfunc
-
 /* -============================-
  *                              *
  *	basic I/O functions	*
@@ -1201,8 +1149,191 @@ diskinfo16:
 	ret
 .endfunc
 
-.section .data
+/* Functions that use 32b registers. */
 
+/* char* strcpy32(char* dst, char* src)
+ *
+ * Copy src to dst, terminate with null byte. Dst has to be at least len(src)+1 bytes big, no
+ * checks are done
+*/
+.global strcpy32
+.func strcpy32
+strcpy32:
+	pushl %esi
+	pushl %edi
+
+	movl %eax, %edi
+	movl %edx, %esi
+	movl %eax, %edx				/* keep the dst pointer */
+	cld
+.Lstrcpy32_loop:
+	lodsb
+	test %al, %al
+	jz .Lstrcpy32_end
+	stosb
+	jmp .Lstrcpy32_loop
+
+.Lstrcpy32_end:
+	movb %al, (%edi)
+	movl %edx, %eax
+	popl %edi
+	popl %esi
+	ret
+.endfunc
+
+
+/* char* strcat32(char* dst, char* src)
+ *
+ * append src string into dst. append nullbyte in the end
+ *
+ * returns pointer to dst
+*/
+.global strcat32
+.func strcat32
+strcat32:
+	pushl %esi
+	pushl %edi
+
+	movl %eax, %edi				/* edi: dst */
+	movl %edx, %esi				/* esi: src */
+	movl %edi, %edx				/* edx: dst store for retval */
+
+	/* find the end of the string dst */
+	xorl %ecx,%ecx
+	dec %ecx		/* maximum size  */
+	xorl %eax, %eax
+	repne scasb
+	dec %edi				/* drop the null terminating byte */
+
+.Lscat32_loop:
+	lodsb
+	test %al, %al
+	jz .Lscat32_end
+	stosb
+	jmp .Lscat32_loop
+
+.Lscat32_end:
+	movb %al, (%edi)
+	movl %edx, %eax
+
+	popl %edi
+	popl %esi
+	ret
+.endfunc
+
+/* int32_t strlen32(char* str) */
+.global strlen32
+.func strlen32
+strlen32:
+	pushl %edi
+	movl %eax, %edi			/* edi: str */
+
+	xorl %eax,%eax			/* scasb compares against al */
+	xorl %ecx,%ecx			/* set the counter to 0xffff */
+	decl %ecx
+	repne scasb			/* search for al in edi */
+
+	incl %ecx			/* we had to decrease ecx by one */
+	not %ecx			/* we can compensate for that by doing 1's complement */
+	xchg %ecx, %eax
+
+	popl %edi
+	ret
+.endfunc
+
+/* char* strtok32_r(char* str, char* delim, char** token)
+ *
+*/
+.global strtok32_r
+.func strtok32_r
+strtok32_r:
+	pushl %esi
+	pushl %edi
+	pushl %ebx
+	pushl %ebp
+
+	cld
+	movl %ecx, %ebp			/* ebp: **token */
+	testl %eax,%eax			/* check if str == NULL */
+	jz .Lstrtok32r_loadptr
+
+	movl %eax, %esi			/* esi: str */
+	xorl %eax, %eax
+	jmp .Lstrtok32r_1
+
+.Lstrtok32r_loadptr:
+	movl (%ebp), %esi
+
+.Lstrtok32r_1:
+	testl %esi,%esi
+	jz .Lstrtok32r_retnull
+
+	movl %esi, %ecx			/* save str */
+	movl %edx, %ebx			/* save delim */
+
+	movl %edx, %edi			/* load di with delim */
+.Lstrtok32r_trim:			/* trim any delims from the start of the string */
+	lodsb
+	testb %al, %al
+	jz .Lstrtok32r_retnull		/* we hit end of str when parsing delims */
+
+.Lstrtok32r_trim.inner:			/* go through all delim[] */
+	movb (%edi), %dl
+	testb %dl, %dl			/* did we hit end of delim */
+	jz .Lstrtok32r_trim_end		/* if yes we're done with the trimming */
+
+	cmpb (%edi), %al
+	je .Lstrtok32r_trim		/* continue with trimming */
+
+	incl %edi			/* next delim char */
+	jmp .Lstrtok32r_trim.inner
+
+.Lstrtok32r_trim_end:
+	decl %esi			/* lodsb increments si automatically */
+	movl %esi,%ecx			/* si has correct start of str, store it */
+
+.Lstrtok32r_main:
+	lodsb
+	testb %al, %al
+	jz .Lstrtok32r_final_done	/* end of string, we're completely done */
+
+	movl %ebx, %edi			/* reset di back to start of delim */
+.Lstrtok32r_main_inner:			/* check all delims */
+	movb (%edi), %dl
+	testb %dl, %dl
+	jz .Lstrtok32r_main		/* end of delims, try next char in str */
+	cmpb %dl, %al
+	je .Lstrtok32r_main_done
+	incl %edi
+	jmp .Lstrtok32r_main_inner
+
+.Lstrtok32r_main_done:
+	xorl %eax, %eax
+	movl %esi, (%ebp)		/* ext ptr will start in place of esi+1 */
+	decl %esi
+	movb %al,(%esi)			/* mark the end of str where delim was */
+	movl %ecx, %eax			/* return val is the orig trimmed str */
+	jmp .Lstok32r_end
+
+.Lstrtok32r_final_done:
+	xorl %eax, %eax
+	movl %eax, (%ebp)
+	movl %ecx, %eax
+	jmp .Lstok32r_end
+
+.Lstrtok32r_retnull:
+	xorl %eax, %eax
+
+.Lstok32r_end:
+	popl %ebp
+	popl %ebx
+	popl %edi
+	popl %esi
+	ret
+.endfunc
+
+
+.section .data
 	.align 2
 	__strtok_nextptr:		.word	0	/* used for internal tracking of str with strtok16() */
 
