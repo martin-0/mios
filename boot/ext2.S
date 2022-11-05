@@ -18,7 +18,7 @@
 		- all segments are 0
 		- %sp starts at 0x1ffc
 
-		tidpbuf[4096]	0x2000 - 0x3fff		in case of need to go through tripple indirect blocks
+		tidpbuf[4096]	0x2000 - 0x2fff		in case of need to go through tripple indirect blocks
 		readbuf[4096]	0x3000 - 0x3fff		used in regular reads
 		blocbuf[4096]	0x4000 - 0x4fff		buffer to hold read blocks
 		sidpbuf[4096]	0x5000 - 0x5fff		in case of need to go through single indirect blocks
@@ -34,6 +34,7 @@
 
    XXX: maybe too much 16/32 asm mixing ?
    XXX: check if all errors are handled properly and dealth with
+   XXX: make all functions description follow the same layout
 
 */
 	.set ADDR_TIBPBUF, 0x2000
