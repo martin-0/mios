@@ -424,13 +424,13 @@ ext2_handle_symlink:
 
 .Lhs_update_path:
 	/* eax has pointer to the new name */
-	movl $ADDR_TIBPBUF, %edx
-	//call strcpy16
+	movl $ADDR_TIBPBUF, %edx			/* use ADDR_TIBPBUF as tmppathbuf */
+	call strcpy32
 
-	/* XXX: TODO:
-		create str* functions to finish handle_symlink() and make search_path() possible
-		create 32b version of these so i can set pathbuf[] in .bss and use if even if addr is above 0xffff
-	*/
+	movl $(ext2_path_delim), %edx			/* eax points to the dst */
+	call strcat32
+
+	// XXX: TODO: finish up, we need the rest of the path (token) to be copied over here
 
 	xorl %eax,%eax
 	jmp .Lhs_lim_end
@@ -1029,7 +1029,7 @@ ext2_access_gde:
 .global ext2_access_block
 .func ext2_access_block
 ext2_access_block:
-	.ifdef DEBUG_VERBOSE
+	.ifdef DEBUG_EXT2
 		pushw %dx
 		pushl %eax
 		pushw $(ext2_dbg_access_block_msg)
@@ -1055,7 +1055,7 @@ ext2_access_block:
 	movl %eax, (q_dap_start)
 	movw $SECTORS_IN_BUF, (w_dap_sectors)
 
-	.ifdef DEBUG_VERBOSE
+	.ifdef DEBUG_EXT2
 		pushl %eax
 		pushw $(ext2_access_block_lba)
 		call printf16
@@ -1305,3 +1305,10 @@ dbg_ext2_show_gbdt:
 	.ifdef DEBUG_VERBOSE
 		dbgmsg_ext2_readdiskstats:	.asciz	"ext2_readdisk: buf: 0x%x, LBA: 0x%lx, sectors: %d\r\n"
 	.endif
+
+	/* character used to split path with */
+	ext2_path_delim:	.asciz	"/"
+
+.section .bss
+	/* buffer to hold the path that is being searched. */
+	pathbuf:	.skip	MAX_PATH
