@@ -1290,14 +1290,14 @@ strtok32_r:
 
 .Lstrtok32r_trim_end:
 	decl %esi			/* lodsb increments si automatically */
-	movl %esi,%ecx			/* si has correct start of str, store it */
+	movl %esi,%ecx			/* esi has correct start of str, store it */
 
 .Lstrtok32r_main:
 	lodsb
 	testb %al, %al
 	jz .Lstrtok32r_final_done	/* end of string, we're completely done */
 
-	movl %ebx, %edi			/* reset di back to start of delim */
+	movl %ebx, %edi			/* reset edi back to start of delim */
 .Lstrtok32r_main_inner:			/* check all delims */
 	movb (%edi), %dl
 	testb %dl, %dl
