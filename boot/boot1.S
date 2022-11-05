@@ -50,8 +50,9 @@ _start:
 	call printf16
 	jmp panic16
 
-	/* Get the system memory map from BIOS */
 .Lgetmem:
+
+	/* Get the system memory map from BIOS */
 	// XXX: I should have more ways of detecting memory, starts with E820 and go down
 	//	to older stuff
 	movw $(smap), %ax			/* detect memory with E820 */
