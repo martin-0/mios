@@ -24,16 +24,15 @@
 		sidpbuf[4096]	0x5000 - 0x5fff		in case of need to go through single indirect blocks
 		didpbuf[4096]	0x6000 - 0x6fff		in case of need to go through double indirect blocks
 
-	Standard inode size is 0x80. I'll allocate twice that much for it just in case:
-		inode		0x7000 - 0x70ff
-		dirnode		0x7100 - 0x71ff
+	Standard inode size is 0x80. We have free space if more is needed.  (0x7c00 is the start of the loader)
+		dirnode		0x7000 - 0x70ff
+		inode		0x7100 - 0x71ff
 
 	To handle symlinks I need temporary space to copy data over. During this operation indirect block buffers
 	are free and can be used to move the data around.
 
 
    XXX: maybe too much 16/32 asm mixing ?
-   XXX: check if all errors are handled properly and dealth with
    XXX: make all functions description follow the same layout
 
 */
@@ -42,8 +41,8 @@
 	.set ADDR_BLOCBUF, 0x4000
 	.set ADDR_SIBPBUF, 0x5000
 	.set ADDR_DIBPBUF, 0x6000
-	.set ADDR_INODE,0x7000
-	.set ADDR_DIRNODE, 0x7100
+	.set ADDR_DIRNODE, 0x7000
+	.set ADDR_INODE,0x7100
 
 	.set EXT2_MAGIC, 0xef53
 	.set EXT2_SIZE_LOG_UNIT, 1024			/* block size: EXT2_SIZE_LOG_UNIT << s_log_block_size */
@@ -81,18 +80,23 @@
 	.set ENOINOPG, 8
 	.set EBLKINODE, 9
 
+	.set INODE_OSFT_TYPEPERM, 0			/* inode offset to type and permissions */
 	.set INODE_OFST_ISIZE, 0x4			/* inode offset to i_size */
 	.set INODE_OFST_DBP_0, 0x28			/* inode offset to direct block pointer 0 */
 	.set INODE_OSFT_SIBP, 0x58			/* inode offset to single indirect block pointer */
 	.set INODE_OSFT_DIBP, 0x5c			/* inode offset to double indirect block pointer */
 	.set INODE_OSFT_TIBP, 0x60			/* inode offset to triple indirect block pointer */
 
+	.set DIR_OFST_RECLEN, 4				/* offset to reclen in directory inode */
+
 	/* inode mode */
 	.set S_IFMT, 0xF000				/* mask to be used for inode.i_mode */
 	.set S_IFDIR, 0x4000				/* inode is a directory */
+	.set S_IFREG, 0x8000				/* inode is a regular file */
+	.set S_IFLNK, 0xa000				/* inode is a symlink */
 
 	.set NAME_LEN, 255				/* max name size */
-	.set MAX_PATH, 4096
+	.set PATH_MAX, 4096
 	.set MAX_SYMLINK_FOLLOW, 40			/* how deeep to follow symlinks */
 	.set FAST_SYMLINK_SIZE, 60			/* symlink's data is in its inode if len not more than FAST_SYMLINK_SIZE */
 
@@ -100,8 +104,9 @@
 	.code16
 
 
-/* int16_t ext2_initmod(boot_partition *bp)
+/* int ext2_initmod(boot_partition *bp)
  *
+ * returns 0 if OK
 */
 .global ext2_initmod
 .func ext2_initmod
@@ -319,69 +324,212 @@ ext2_initmod:
 	ret
 .endfunc
 
-/* XXX: for now: dummy function called from boot1 to test ext2 module */
+/* int ext2_search_file(char* filepath)
+ *
+ * search for the file in the filepath. filepath has to be an absolute path
+ *
+ * returns: inode if OK, 0 otherwise
+*/
 .global ext2_search_file
 .func ext2_search_file
 ext2_search_file:
-	call dbg_ext2_show_superblock
+	pushl %esi
+	pushl %edi						/* token */
+	pushl %ebx
 
-	movl $ADDR_BLOCBUF, %ecx
+	movzxw %ax, %esi
+	movl %esi, %eax						/* PATH_MAX check */
+	call strlen32
+	cmpl $PATH_MAX, %eax
+	jae .Lsf_err
+
+	/* copy the string to pathbuf where it will be worked on */
+	movl %esi, %edx
+	movl $pathbuf, %eax
+	call strcpy32
+
+	movl $pathbuf, %edi					/* edi: token: starts as pathbuf */
+
+.Lsf_mainloop:
+	test %edi, %edi
+	jz .Lsf_postloop					/* we are done parsing the path */
+
+	/* check if it's absolute path */
+	movb (%edi), %al
+	cmpb $'/', %al
+	jne .Lsf_mainloop.1
+
+	/* access_inode(2) */
+.Lsf_access_root:
+	movl $ADDR_BLOCBUF, %ecx				/* open rootdir, inode 2 */
 	movl $ADDR_DIRNODE, %edx
 	movl $2, %eax
-	call ext2_access_inode			/* 0 on success */
-	test %eax, %eax
-	jnz .Ldebugend
+	call ext2_access_inode					/* 0 on success */
+	jc .Lsf_rootofailed					/* handle access error */
+	testl %eax, %eax					/* while redundant check I don't mind */
+	jnz .Lsf_rootofailed
 
-	jmp .Ltmp2
-		tmp2str: .asciz "boot"
-		tmp3str: .asciz "kernel"
-	.Ltmp2:
-	movl $ADDR_BLOCBUF, %ecx
-	movw $(tmp2str), %dx
+	/* root node has to be directory */
+	movl $ADDR_DIRNODE, %ebx				/* ebx: dirnode */
+	movw INODE_OSFT_TYPEPERM(%ebx), %ax
+	andw $S_IFMT, %ax
+	cmpw $S_IFDIR, %ax
+	jne .Lsf_rootnotdir
+
+	movl $(l_addr_token), %ecx				/* strtok_r(pathbuf, "/", &token) */
+	movl $(ext2_path_delim), %edx
+	movl %edi, %eax						/* edi: starts at pathbuf */
+	call strtok32_r
+	movl %eax, %edi						/* now points to next token */
+	jmp .Lsf_mainloop
+
+.Lsf_mainloop.1:
+	/* not an absolute path */
+	movl $ADDR_BLOCBUF, %ecx				/* ext2_search_in_dirnode(INODE, matchstr, BLOCBUF) */
+	movl %edi, %edx
 	movl $ADDR_DIRNODE, %eax
-	call ext2_search_dir_entry		/* ptr on success */
-	test %eax,%eax
-	jz .Ldebugend
+	call ext2_search_in_dirnode				/* inum on success */
+	test %eax, %eax						/* while ext2_search_in_dirnode() sets CF on error we can */
+	jz .Lsf_err_generic					/* get the same check by checking returned inode */
 
-	movl $ADDR_BLOCBUF, %ecx
-	movl $ADDR_DIRNODE, %edx		/* boot found */
-	call ext2_access_inode			/* 0 on success */
-	test %eax, %eax
-	jnz .Ldebugend
-
-	movl $ADDR_BLOCBUF, %ecx
-	movw $(tmp3str), %dx
-	movl $ADDR_DIRNODE, %eax
-	call ext2_search_dir_entry		/* ptr on success */
-	jz .Ldebugend
-
+	/* eax: inode to search */
 	movl $ADDR_BLOCBUF, %ecx
 	movl $ADDR_INODE, %edx
-	call ext2_access_inode			/* 0 on success */
-	test %eax, %eax
-	jnz .Ldebugend
+	call ext2_access_inode					/* 0 on success CF set on error */
+	jc .Lsf_err_generic
 
-	movl $ADDR_BLOCBUF, %ecx
+	/* We have inode loaded. Find out what the next token is. Then decide depending on the inode type:
+
+		DIR:		continue if we have next token ; error otherwise
+		FILE:		if next token is NULL we are done, we found it. error otherwise
+		SYMLINK:	deal with the symlink and continue
+		DEFAULT:	any other type of indoe means error
+	*/
+
+	/* prepare the next token */
+	movl $(l_addr_token), %ecx
+	movl $(ext2_path_delim), %edx
+	xorl %eax, %eax
+	call strtok32_r
+	movl %edi, %ecx						/* ecx: previous token */
+	movl %eax, %edi						/* edi now points to the next token */
+
+	/* check the type of inode */
+	movl $ADDR_INODE, %ebx					/* ebx: inode */
+	movw INODE_OSFT_TYPEPERM(%ebx), %ax
+	andw $S_IFMT, %ax
+
+	cmpw $S_IFDIR, %ax					/* is it directory? */
+	jne .Lsf_isit_file
+
+	/* current node is directory */
+	test %edi, %edi
+	jnz .Lsf_update_dirnode
+
+	/* handle error */
+	pushw %cx						/* ecx still holds the pointer to previous token */
+	pushw $(ext2_search_file_path_isdir)
+	call printf16
+	addw $4, %sp
+	jmp .Lsf_err_end
+
+.Lsf_update_dirnode:
+	/* inode we are working with now will become dirnode */
+	movw (w_ext2_sb_inode_size), %cx
+	movw $(ADDR_INODE), %dx
+	movw $(ADDR_DIRNODE), %ax
+	call memcpy16
+	jmp .Lsf_mainloop
+
+.Lsf_isit_file:
+	cmpw $S_IFREG, %ax					/* is it regular file? */
+	jne .Lsf_isit_symlink
+	test %edi,%edi						/* we got what we were looking for */
+	jz .Lsf_postloop
+
+	/* handle error */
+	pushw %cx						/* ecx still holds the pointer to previous token */
+	pushw $(ext2_search_file_path_notdir)
+	call printf16
+	addw $4, %sp
+	jmp .Lsf_err_end
+
+.Lsf_isit_symlink:
+	cmpw $S_IFLNK, %ax
+	jne .Lsf_unknown_type
+
+	movl %edi, %edx						/* token */
+	movl $ADDR_INODE, %eax					/* inode */
+	call ext2_handle_symlink
+	test %eax, %eax						/* CF is set too */
+	jnz .Lsf_err_generic
+
+	/* we need to fix the token */
+	movl $(pathbuf), %edi					/* edi has to point back to pathbuf */
+
+	/* if absolute path start from the beginning */
+	movb (%edi), %al
+	cmpb $'/', %al
+	je .Lsf_mainloop
+
+	/* kick start it */
+	movl $(l_addr_token), %ecx				/* strtok_r(pathbuf, "/", &token) */
+	movl $(ext2_path_delim), %edx
+	movl $(pathbuf), %eax
+	call strtok32_r
+	movl %eax, %edi						/* now points to next token */
+	jmp .Lsf_mainloop.1
+
+	/* unknown inode type, abort the search */
+.Lsf_unknown_type:
+	pushw %ax
+	pushw $(ext2_search_file_unk_inodetype)
+	call printf16
+	addw $4, %sp
+	jmp .Lsf_err_end
+
+.Lsf_postloop:
+
+	// INFO: if i get here file was found
+
+	// /* char* access_block(unsigned int blockid, char* buf)
+	movl $ADDR_BLOCBUF, %edx
 	movl $ADDR_INODE,%ebx
-	movl INODE_OFST_DBP_0(%edx), %eax	/* block0 of ELF */
+	movl INODE_OFST_DBP_0(%ebx), %eax	/* block0 of ELF */
 	call ext2_access_block
 
-	call puts16
-
-	movl $ADDR_BLOCBUF, %eax
-	movl $16, %edx
+	movw $16, %dx
 	call dump_mem16
 
-	jmp .Ldloop
+	jmp .Lsf_end
 
-.Ldebugend:
-	pushw %ax
-	pushw $a
-	call printf16
-.Ldloop:
-	hlt
-	jmp .Ldloop
-	a: .asciz "FAIL: %x\r\n"
+	/* handle errors */
+.Lsf_rootnotdir:
+	movw $ext2_search_file_rootnotdir, %ax
+	call puts16
+	jmp .Lsf_err_end
+
+.Lsf_rootofailed:
+	movw $(ext2_search_file_rootofailed), %ax
+	call puts16
+	jmp .Lsf_err_end
+
+.Lsf_err_generic:
+	movl $(ext2_search_file_genericerr), %eax
+	call puts16
+	jmp .Lsf_err_end
+
+.Lsf_err:
+	movw $ext2_search_file_path_toolong, %ax
+	call puts16
+
+.Lsf_err_end:
+	xorl %eax,%eax
+
+.Lsf_end:
+	popl %ebx
+	popl %edi
+	popl %esi
 	ret
 .endfunc
 
@@ -396,6 +544,7 @@ ext2_search_file:
 ext2_handle_symlink:
 	pushl %esi
 	pushl %edi
+	pushl %ebx
 
 	movl %eax, %esi					/* esi: inode */
 	movl %edx, %edi					/* edi: token */
@@ -412,7 +561,7 @@ ext2_handle_symlink:
 	jae .Lhs_ab					/* or if access_block() is required */
 
 	/* symlink name is in inode's data */
-	leal INODE_OFST_DBP_0(%esi), %eax
+	leal INODE_OFST_DBP_0(%esi), %ebx		/* ebx: ptr to symlink name */
 	jmp .Lhs_update_path
 
 .Lhs_ab:
@@ -420,54 +569,112 @@ ext2_handle_symlink:
 	movl INODE_OFST_DBP_0(%esi), %eax
 	movl $ADDR_BLOCBUF, %edx
 	call ext2_access_block
-	jz .Lhs_err
+	movl %eax, %ebx					/* ebx: symlink name */
+	jc .Lhs_err
 
 .Lhs_update_path:
-	/* eax has pointer to the new name */
-	movl $ADDR_TIBPBUF, %edx			/* use ADDR_TIBPBUF as tmppathbuf */
+	movl %ebx, %eax
+	call strlen32
+	cmpl $NAME_LEN, %eax
+	ja .Lhs_name_toolong
+
+	/* copy symlink to temporary buffer */
+	movl %ebx, %edx
+	movl $ADDR_TIBPBUF, %eax			/* use ADDR_TIBPBUF as tmppathbuf */
 	call strcpy32
 
-	movl $(ext2_path_delim), %edx			/* eax points to the dst */
+	/* token was obtained by strtok32_r so it either points to a next token or it's null */
+	test %edi, %edi					/* nothing else to copy */
+	jz .Lhs_copy_to_pathbuf
+
+	/* append "/" and token */
+	movl $(ext2_path_delim), %edx
+	movl $ADDR_TIBPBUF, %eax
 	call strcat32
 
-	// XXX: TODO: finish up, we need the rest of the path (token) to be copied over here
+	movl %edi, %edx
+	movl $ADDR_TIBPBUF, %eax
+	call strcat32
+
+.Lhs_copy_to_pathbuf:
+	/* sanity check just in case */
+	movl $ADDR_TIBPBUF, %eax
+	call strlen32
+	cmpl $PATH_MAX, %eax
+	ja .Lhs_path_toolong
+
+	movl $ADDR_TIBPBUF, %edx			/* update the pathbuf with new path */
+	movl $pathbuf, %eax
+	call strcpy32
+
+	.ifdef DEBUG_VERBOSE
+		pushw $ADDR_TIBPBUF
+		pushw $(ext2_handle_symlink_newpath)
+		call printf16
+		addw $4, %sp
+	.endif
+
+	/* pathbuf is now updated. strtok routine has to be updated now in search_file() */
 
 	xorl %eax,%eax
-	jmp .Lhs_lim_end
+	jmp .Lhs_end
 
-	/* generic error */
-.Lhs_err:
-	inc %eax
-	jmp .Lhs_lim_end
+.Lhs_path_toolong:
+	movw $(ext2_search_file_path_toolong), %ax
+	call puts16
+	jmp .Lhs_err
 
-	/* max symlink depth reached */
+.Lhs_name_toolong:
+	/* name too long */
+	pushw $NAME_LEN
+	pushw %ax
+	pushw $(ext2_handle_symlink_name_toolong)
+	call printf16
+	addw $6, %sp
+	jmp .Lhs_err
+
 .Lhs_lim_err:
+	/* max symlink depth reached */
 	pushw %cx
 	pushw $(ext2_handle_symlink_err)
 	call printf16
 	addw $4, %sp
 
-	xorl %eax, %eax
-	incw %ax
+.Lhs_err:
+	movw $1, %ax
+	stc
 
-.Lhs_lim_end:
+.Lhs_end:
+	popl %ebx
 	popl %edi
 	popl %esi
 	ret
 .endfunc
 
 
-/* int ext2_search_dir_entry(struct* inode, char* matchstr, char* blockbuf)
+/* int ext2_search_in_dirnode(struct* inode, char* matchstr, char* blockbuf)
  *
  * returns inode of matchstr
  * returns 0 if matchstr not found
 */
-.global ext2_search_dir_entry
-.func ext2_search_dir_entry
-ext2_search_dir_entry:
-	pushl %ebx
+.global ext2_search_in_dirnode
+.func ext2_search_in_dirnode
+ext2_search_in_dirnode:
+	.ifdef DEBUG_VERBOSE
+		pushl %esi
+		movw 4(%esp), %si		// caller
+		pushw %dx
+		pushw %cx
+		pushw %si
+		pushw $(ext2_search_in_dirnode_hellodbg)	// "search_dir_inode: called by 0x%x: buf: 0x%x, string: >%s<\r\n"
+		call printf16
+		addw $8, %sp
+		popl %esi
+	.endif
+
 	pushl %esi
 	pushl %edi
+	pushl %ebx
 	pushl %ebp
 	movl %esp, %ebp
 	subl $20, %esp
@@ -475,18 +682,6 @@ ext2_search_dir_entry:
 	movl %edx, %edi					/* edi: matchstr */
 	movl %ecx, -8(%ebp)				/* block buf */
 	movl $0, -4(%ebp)				/* i variable */
-
-	.ifdef DEBUG_VERBOSE
-		pushl %eax
-		pushl %ecx
-		pushw %dx
-		pushw $(ext2_search_dir_entry_msg)
-		call printf16
-		addw $2, %sp
-		popw %dx
-		popl %ecx
-		popl %eax
-	.endif
 
 	/* check if the inode is directory */
 	movl %eax, %esi					/* esi: inode */
@@ -496,291 +691,198 @@ ext2_search_dir_entry:
 	je .Lsde_isdir
 
 	/* can't proceed with inode is not a directory */
-	movw $(ext2_search_dir_entry_err), %ax
+	movw $(ext2_search_in_dirnode_err), %ax
 	call puts16
 	xorl %eax, %eax
-	jmp .Lsde_end
+	jmp .Lsde_err					/* handle error */
 
 .Lsde_isdir:
-	movl %esi, %ebx					/* start of direct block pointer */
-	addl $INODE_OFST_DBP_0, %ebx
+	movl %esi, %ebx					/* ebx: inode  */
+	addl $INODE_OFST_DBP_0, %ebx			/* pointing to first direct block pointer */
 
-.Lsde_search_blocks:
-	/* loop all 12 block entries */
-	movl -8(%ebp),%edx
+.Lsde_search_direct_blocks:
+	/* loop all 12 direct block entries */
 	movl (%ebx), %eax				/* block id */
+	testl %eax, %eax
+	jz .Lsde_search_direct_blocks_keeplooking	/* skip over 0 entry */
+
+	movl -8(%ebp),%edx				/* block buf */
 	call ext2_access_block
-	test %ax, %ax
-	jnz .Lsde_search_blocks.abok
+	jnc .Lsde_search_direct_blocks.abok		/* handle error */
 
-	pushl (%ebx)					/* display error and return 0 */
-	pushw $(ext2_search_dir_entry_err2)
-	call printf16
-	addw $6, %sp
+	.ifdef DEBUG_VERBOSE
+		pushl (%ebx)				/* display error and return 0 */
+		pushw $(ext2_search_in_dirnode_err2)
+		call printf16
+		addw $6, %sp
+	.endif
+	jmp .Lsde_err					/* handle error */
 
-	xorl %eax, %eax
-	jmp .Lsde_end
-
-.Lsde_search_blocks.abok:
+.Lsde_search_direct_blocks.abok:
 	/* eax points to the bufcache location */
-	movl %edi, %edx
-	call ext2_search_dir_entry_nohash
+	movl %edi, %edx					/* string to find */
+	call ext2_walk_dir_entry_nohash
+	jc .Lsde_err					/* abort if error was detected */
 	test %eax, %eax
 	jnz .Lsde_end					/* we found the inode, it's in ax, return */
 
 	/* keep looking */
-	addl $4, %ebx
-	incw -4(%ebp)					/* i variable */
+.Lsde_search_direct_blocks_keeplooking:
+	addl $4, %ebx					/* blockid is uint32_t */
+	incl -4(%ebp)					/* i++ */
 	cmpw $12, -4(%ebp)
-	jb .Lsde_search_blocks
+	jb .Lsde_search_direct_blocks
 
 	/* direct blocks search didn't yield any results, need to check indirect ones */
 
 	/* SIBP */
 	.ifdef DEBUG_VERBOSE
-		movw $(ext2_search_dir_entry_msg_sidp), %ax
+		.if DEBUG_VERBOSE > 1
+		movw $(ext2_search_in_dirnode_msg_sibp), %ax
 		call puts16
+		.endif
 	.endif
 
-	/* Here we used ADDR_BLOCBUF that holds the entries for ext2_search_dir_entry_nohash_sibp().
-	   This function needs to use its own buffer for access_block()
-	 */
-	movl -8(%ebp), %edx				/* block buffer ADDR_BLOCKBUF */
+	/* ebx actually points now to SIBP; referencing it with esi to make it clear what I'm doing */
 	movl INODE_OSFT_SIBP(%esi), %eax
+	testl %eax, %eax				/* skip over unused entry */
+	jnz .Lsde_search_sibp_ok
+
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 1
+		movw $(ext2_search_in_dirnode_sibp_empty), %ax
+		call puts16
+		xorl %eax,%eax
+		.endif
+	.endif
+	jmp .Lsde_handle_dibp				/* move to DIBP */
+
+.Lsde_search_sibp_ok:
+	movl -8(%ebp), %edx				/* block buffer ADDR_BLOCKBUF */
 	call ext2_access_block				/* returns ptr to buf if ok */
-	test %eax, %eax
-	jz .Lsde_end
-	movl %edi, %edx
-	call ext2_search_dir_entry_nohash_sibp
-	test %eax, %eax
+	jc .Lsde_err					/* we should always have valid pointer from access_block if there's no issue */
+
+	/* ADDR_BLOCKBUF is now full of blockid entries, referencing SIBP entries */
+	movl %edi, %edx					/* matchstr */
+	call ext2_walk_dir_entry_nohash_sibp
+	jc .Lsde_err					/* abort on error */
+	test %eax, %eax					/* did we find anything? */
 	jnz .Lsde_end
 
 	/* DIBP */
-	movl -8(%ebp), %edx				/* block buffer ADDR_BLOCBUF */
+.Lsde_handle_dibp:
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 1
+		movw $(ext2_search_in_dirnode_msg_dibp), %ax
+		call puts16
+		.endif
+	.endif
+
 	movl INODE_OSFT_DIBP(%esi), %eax
+	testl %eax, %eax
+	jnz .Lsde_search_dibp_ok
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 1
+		movw $(ext2_search_in_dirnode_dibp_empty), %ax
+		call puts16
+		xorl %eax,%eax
+		.endif
+	.endif
+	jmp .Lsde_handle_tibp				/* move to TIBP */
+
+.Lsde_search_dibp_ok:
+	movl -8(%ebp), %edx				/* block buffer ADDR_BLOCBUF */
 	call ext2_access_block				/* returns ptr to buf if ok */
-	test %eax, %eax
-	jz .Lsde_end
+	jc .Lsde_err
 	movl %edi, %edx
-	call ext2_search_dir_entry_nohash_dibp
-	test %eax, %eax
+	call ext2_walk_dir_entry_nohash_dibp
+	jc .Lsde_err					/* abort on error */
+	test %eax, %eax					/* did we find anything? */
 	jnz .Lsde_end
 
+.Lsde_handle_tibp:
+
 	/* TIBP */
-	movl -8(%ebp), %edx				/* block buffer ADDR_BLOCBUF */
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 1
+		movw $(ext2_search_in_dirnode_msg_tibp), %ax
+		call puts16
+		.endif
+	.endif
+
 	movl INODE_OSFT_TIBP(%esi), %eax
+	testl %eax,%eax
+	jnz .Lsde_search_tibp_ok
+
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 1
+		movw $(ext2_search_in_dirnode_tibp_empty), %ax
+		call puts16
+		xorl %eax,%eax
+		.endif
+	.endif
+	xorl %eax,%eax					/* nothing else to search; not found, return */
+	jmp .Lsde_end
+
+.Lsde_search_tibp_ok:
+	movl -8(%ebp), %edx				/* block buffer ADDR_BLOCBUF */
 	call ext2_access_block				/* returns ptr to buf if ok */
-	test %eax, %eax
-	jz .Lsde_end
+	jc .Lsde_err
 	movl %edi, %edx
-	call ext2_search_dir_entry_nohash_tibp
-	test %eax, %eax
+	call ext2_walk_dir_entry_nohash_tibp
+	jc .Lsde_err					/* abort on error */
+	test %eax, %eax					/* did we find anything? */
 	jnz .Lsde_end
 
 	xorl %eax,%eax		/* we searched it all and didn't find it */
+	jmp .Lsde_end
+
+.Lsde_err:
+	movw $(ext2_search_in_dirnode_err3), %ax		/* critical error */
+	call puts16
+	xorl %eax,%eax
+	addl $20, %esp
+	stc
+	jmp .Lsde_end2
 
 .Lsde_end:
 	addl $20, %esp
-	popl %ebp
-	popl %edi
-	popl %esi
-	popl %ebx
-	ret
-.endfunc
 
-/* int ext2_search_dir_entry_nohash_sibp(char* buf, char* matchstr)
- *
- * search matchstr in single indirect data block
- *
- * returns: inode if OK, 0 otherwise
-*/
-.global ext2_search_dir_entry_nohash_sibp
-.func ext2_search_dir_entry_nohash_sibp
-ext2_search_dir_entry_nohash_sibp:
-	pushl %esi
-	pushl %edi
-	pushl %ebx
-	pushl %ebp
-
-	movl %eax, %esi					/* esi: block cache where search is done */
-	movl %edx, %edi					/* edi: matchstr */
-
-	/* determine how many block ids fit to blocksize */
-	movl (l_ext2_sb_blocksize), %eax		/* block_size/sizeof(int32t) */
-	shr $2, %eax
-
-	pushw %ax
-	pushw $(ext2_block_entries_in_blocksize_msg)
-	call printf16
-	addw $4, %sp
-
-	movl %eax, %ebp					/* block_entries */
-	xorl %ebx, %ebx					/* current entry, "i" */
-
-	/* go through each indirect entry */
-.Lsden_sibp_loop:
-	cmp %ebp, %ebx
-	jnb .Lsden_sibp_not_found			/* we went through all entries and didn't find it */
-
-	movl (%esi), %eax				/* current block id */
-	movl $ADDR_SIBPBUF, %edx			/* use ADDR_SIBPBUF as new block buffer */
-	call ext2_access_block
-	test %eax,%eax					/* should return pointer to a block */
-	jz .Lsden_sibp_end				/* finish if error */
-
-	movl %edi, %edx
-	call ext2_search_dir_entry_nohash
-	test %eax, %eax
-	jnz .Lsden_sibp_end				/* we found the entry */
-
-	addl $4, %esi					/* move to next block */
-	inc %ebx					/* i++ */
-	jmp .Lsden_sibp_loop
-
-.Lsden_sibp_not_found:
-	xorl %eax,%eax
-
-.Lsden_sibp_end:
+.Lsde_end2:
 	popl %ebp
 	popl %ebx
 	popl %edi
 	popl %esi
-
 	ret
 .endfunc
 
-/* int ext2_search_dir_entry_nohash_dibp(char* buf, char* matchstr)
- *
- * search matchstr in double indirect data block
- *
- * returns: inode if OK, 0 otherwise
-*/
-.global ext2_search_dir_entry_nohash_dibp
-.func ext2_search_dir_entry_nohash_dibp
-ext2_search_dir_entry_nohash_dibp:
-	pushl %esi
-	pushl %edi
-	pushl %ebx
-	pushl %ebp
-
-	movl %eax, %esi					/* esi: block cache where search is done */
-	movl %edx, %edi					/* edi: matchstr */
-
-	/* determine how many block ids fit to blocksize */
-	movl (l_ext2_sb_blocksize), %eax		/* block_size/sizeof(int32t) */
-	shr $2, %eax
-
-	pushw %ax
-	pushw $(ext2_block_entries_in_blocksize_msg)
-	call printf16
-	addw $4, %sp
-
-	movl %eax, %ebp					/* block_entries */
-	xorl %ebx, %ebx					/* current entry, "i" */
-
-	/* go through each indirect entry */
-.Lsden_dibp_loop:
-	cmp %ebp, %ebx
-	jnb .Lsden_dibp_not_found			/* we went through all entries and didn't find it */
-
-	movl (%esi), %eax				/* current block id */
-	movl $ADDR_DIBPBUF, %edx			/* use ADDR_DIBPBUF as new block buffer */
-	call ext2_access_block
-	test %eax,%eax					/* should return pointer to a block */
-	jz .Lsden_dibp_end				/* finish if error */
-
-	movl %edi, %edx
-	call ext2_search_dir_entry_nohash_sibp
-	test %eax, %eax
-	jnz .Lsden_dibp_end				/* we found the entry */
-
-	addl $4, %esi					/* move to next block */
-	inc %ebx					/* i++ */
-	jmp .Lsden_dibp_loop
-
-.Lsden_dibp_not_found:
-	xorl %eax,%eax
-
-.Lsden_dibp_end:
-	popl %ebp
-	popl %ebx
-	popl %edi
-	popl %esi
-
-	ret
-.endfunc
-
-/* int ext2_search_dir_entry_nohash_tibp(char* buf, char* matchstr)
- *
- * search matchstr in tripple indirect data block
- *
- * returns: inode if OK, 0 otherwise
-*/
-.global ext2_search_dir_entry_nohash_tibp
-.func ext2_search_dir_entry_nohash_tibp
-ext2_search_dir_entry_nohash_tibp:
-	pushl %esi
-	pushl %edi
-	pushl %ebx
-	pushl %ebp
-
-	movl %eax, %esi					/* esi: block cache where search is done */
-	movl %edx, %edi					/* edi: matchstr */
-
-	/* determine how many block ids fit to blocksize */
-	movl (l_ext2_sb_blocksize), %eax		/* block_size/sizeof(int32t) */
-	shr $2, %eax
-
-	pushw %ax
-	pushw $(ext2_block_entries_in_blocksize_msg)
-	call printf16
-	addw $4, %sp
-
-	movl %eax, %ebp					/* block_entries */
-	xorl %ebx, %ebx					/* current entry, "i" */
-
-	/* go through each indirect entry */
-.Lsden_tibp_loop:
-	cmp %ebp, %ebx
-	jnb .Lsden_tibp_not_found			/* we went through all entries and didn't find it */
-
-	movl (%esi), %eax				/* current block id */
-	movl $ADDR_TIBPBUF, %edx			/* use ADDR_TIBPBUF as new block buffer */
-	call ext2_access_block
-	test %eax,%eax					/* should return pointer to a block */
-	jz .Lsden_tibp_end				/* finish if error */
-
-	movl %edi, %edx
-	call ext2_search_dir_entry_nohash_dibp
-	test %eax, %eax
-	jnz .Lsden_tibp_end				/* we found the entry */
-
-	addl $4, %esi					/* move to next block */
-	inc %ebx					/* i++ */
-	jmp .Lsden_tibp_loop
-
-.Lsden_tibp_not_found:
-	xorl %eax,%eax
-
-.Lsden_tibp_end:
-	popl %ebp
-	popl %ebx
-	popl %edi
-	popl %esi
-
-	ret
-.endfunc
-
-/* int ext2_search_dir_entry_nohash(char* buf, char* matchstr)
+/* int ext2_walk_dir_entry_nohash(char* buf, char* matchstr)
  *
  * search the directory entry, ignore hash tree if it exists
  *
  * returns:	inode of matched string
  * err: 	0
  */
-.global ext2_search_dir_entry_nohash
-.func ext2_search_dir_entry_nohash
-ext2_search_dir_entry_nohash:
+.global ext2_walk_dir_entry_nohash
+.func ext2_walk_dir_entry_nohash
+ext2_walk_dir_entry_nohash:
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pushl %ecx
+		movw 4(%esp), %cx
+
+		pushw %dx
+		pushw %ax
+		pushw %cx
+		pushw $(ext2_walk_dir_entry_hellodbg)	// "walk_dir_entry: called by 0x%x: buf: 0x%x, string: >%s<\r\n"
+		call printf16
+		addw $4, %sp
+		popw %ax
+		popw %dx
+		popl %ecx
+		.endif
+	.endif
+
 	pushl %esi
 	pushl %edi
 	pushl %ebx
@@ -795,16 +897,21 @@ ext2_search_dir_entry_nohash:
 
 	xorl %ebx, %ebx				/* csize */
 .Lsden_mainloop:
-	cmpl %ebx,(l_ext2_sb_blocksize)
-	jb .Lsden_nofound
+
+	cmpl (l_ext2_sb_blocksize), %ebx
+	jae .Lsden_nofound
 
 	/* to avoid infinite loop check the size of the direntry */
-	cmpl $0, 4(%esi,%ebx)			/* it can't be 0 */
-	jnz .Lsden_mainloop_csizeok
+	cmpw $0, DIR_OFST_RECLEN(%esi,%ebx)	/* it can't be 0 */
+	jne .Lsden_mainloop_csizeok
 
-	movw $(ext2_search_dir_entry_nohash_err), %ax
+	/* display the error */
+	movw $(ext2_walk_dir_entry_nohasg_err), %ax
 	call puts16
-	jmp .Lsden_nofound
+
+	xorl %eax,%eax
+	stc					/* indicate we have a problem */
+	jmp .Lsden_end
 
 .Lsden_mainloop_csizeok:
 	movzxb 6(%esi,%ebx), %cx		/* dir len */
@@ -812,23 +919,14 @@ ext2_search_dir_entry_nohash:
 	cmp %cx, %bp				/* skip the entry if its size is not the same */
 	jne .Lsden_keepgoing			/* as matchstr len */
 
-	movw %di, %dx
+	movw %di, %dx				/* cx set above, dx: string to match */
 	leaw 8(%esi,%ebx), %ax
-/*
-	.ifdef DEBUG_VERBOSE
-		pushw %ax
-		pushw $(ext2_search_dir_entry_nohash_debug)
-		call printf16
-		addw $2, %sp
-		popw %ax
-	.endif
-*/
 	call strncmp16
 	test %ax,%ax
 	jz .Lsden_found
 
 .Lsden_keepgoing:
-	addw 4(%esi,%ebx), %bx
+	addw DIR_OFST_RECLEN(%esi,%ebx), %bx
 	jmp .Lsden_mainloop
 
 .Lsden_nofound:
@@ -838,13 +936,17 @@ ext2_search_dir_entry_nohash:
 .Lsden_found:
 	movl (%esi,%ebx), %eax					/* inode */
 	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pushf
 		pushl %eax
 		pushl %eax
 		pushw %di
-		pushw $(ext2_search_dir_entry_nohash_found)
+		pushw $(ext2_walk_dir_entry_nohash_found)
 		call printf16
 		addw $8, %sp
 		popl %eax
+		popf
+		.endif
 	.endif
 
 .Lsden_end:
@@ -856,16 +958,305 @@ ext2_search_dir_entry_nohash:
 .endfunc
 
 
+/* int ext2_walk_dir_entry_nohash_sibp(char* buf, char* matchstr)
+ *
+ * search matchstr in single indirect data block
+ *
+ * returns: inode if OK, 0 otherwise
+*/
+.global ext2_walk_dir_entry_nohash_sibp
+.func ext2_walk_dir_entry_nohash_sibp
+ext2_walk_dir_entry_nohash_sibp:
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pusha
+		pushw %dx
+		pushw $ADDR_SIBPBUF
+		pushw %ax
+		pushw $(ext2_walk_dir_entry_nohash_sibp_hellodbg)	// "walk sibp: walking buf: 0x%x, my buf: 0x%x, str: %s\r\n"
+		call printf16
+		addw $8, %sp
+		popa
+		.endif
+	.endif
+
+	pushl %esi
+	pushl %edi
+	pushl %ebx
+	pushl %ebp
+
+	movl %eax, %esi					/* esi: block buffer full of SIBP entries */
+	movl %edx, %edi					/* edi: matchstr */
+
+	/* determine how many block ids fit to blocksize */
+	movl (l_ext2_sb_blocksize), %eax		/* block_size/sizeof(int32t) */
+	shr $2, %eax
+	movl %eax, %ebp					/* ebp: block_entries */
+	xorl %ebx, %ebx					/* ebx: current entry, "i" */
+
+	/* go through each indirect entry */
+.Lsden_sibp_loop:
+
+	cmp %ebp, %ebx
+	jnb .Lsden_sibp_not_found			/* we went through all entries and didn't find it */
+
+	movl (%esi), %eax				/* eax: current block id */
+	testl %eax, %eax				/* skip over empty entry */
+	jz .Lsden_sibp_keeplooking
+
+	/* take a blockid and load ADDR_SIBPBUF with it */
+	movl $ADDR_SIBPBUF, %edx			/* edx: use ADDR_SIBPBUF as new block buffer */
+	call ext2_access_block
+	jc .Lsden_sibp_err				/* abort on error */
+
+	movl %edi, %edx					/* matchstr */
+	call ext2_walk_dir_entry_nohash
+	jc .Lsden_sibp_err				/* abort on error */
+	test %eax, %eax
+	jnz .Lsden_sibp_end				/* we found the entry */
+
+.Lsden_sibp_keeplooking:
+	addl $4, %esi					/* move to next blockid */
+	inc %ebx					/* i++ */
+	jmp .Lsden_sibp_loop
+
+	/* if not found return 0 */
+	jmp .Lsden_sibp_not_found
+
+.Lsden_sibp_err:
+	xorl %eax,%eax					/* xor clears the cf, needs to be done now */
+	stc
+	jmp .Lsden_sibp_end
+
+.Lsden_sibp_not_found:
+	xorl %eax,%eax
+
+.Lsden_sibp_end:
+	popl %ebp
+	popl %ebx
+	popl %edi
+	popl %esi
+
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pushf
+		pusha
+		movw $(ext2_walk_dir_entry_nohash_sibp_byedbg), %ax
+		call puts16
+		popa
+		popf
+		.endif
+	.endif
+	ret
+.endfunc
+
+/* int ext2_walk_dir_entry_nohash_dibp(char* buf, char* matchstr)
+ *
+ * search matchstr in single indirect data block
+ *
+ * returns: inode if OK, 0 otherwise
+*/
+.global ext2_walk_dir_entry_nohash_dibp
+.func ext2_walk_dir_entry_nohash_dibp
+ext2_walk_dir_entry_nohash_dibp:
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pusha
+		pushw %dx
+		pushw $ADDR_DIBPBUF
+		pushw %ax
+		pushw $(ext2_walk_dir_entry_nohash_dibp_hellodbg)
+		call printf16
+		addw $8, %sp
+		popa
+		.endif
+	.endif
+
+	pushl %esi
+	pushl %edi
+	pushl %ebx
+	pushl %ebp
+
+	movl %eax, %esi					/* esi: block buffer full of DIBP entries */
+	movl %edx, %edi					/* edi: matchstr */
+
+	/* determine how many block ids fit to blocksize */
+	movl (l_ext2_sb_blocksize), %eax		/* block_size/sizeof(int32t) */
+	shr $2, %eax
+	movl %eax, %ebp					/* ebp: block_entries */
+	xorl %ebx, %ebx					/* ebx: current entry, "i" */
+
+	/* go through each indirect entry */
+.Lsden_dibp_loop:
+
+	cmp %ebp, %ebx
+	jnb .Lsden_dibp_not_found			/* we went through all entries and didn't find it */
+
+	movl (%esi), %eax				/* eax: current block id */
+	testl %eax, %eax				/* skip over empty entry */
+	jz .Lsden_dibp_keeplooking
+
+	/* take a blockid and load ADDR_DIBPBUF with it */
+	movl $ADDR_DIBPBUF, %edx			/* edx: use ADDR_DIBPBUF as new block buffer */
+	call ext2_access_block
+	jc .Lsden_dibp_err				/* abort on error */
+
+	movl %edi, %edx					/* matchstr */
+	call ext2_walk_dir_entry_nohash_sibp
+	jc .Lsden_dibp_err				/* abort on error */
+	test %eax, %eax
+	jnz .Lsden_dibp_end				/* we found the entry */
+
+.Lsden_dibp_keeplooking:
+	addl $4, %esi					/* move to next blockid */
+	inc %ebx					/* i++ */
+	jmp .Lsden_dibp_loop
+
+	/* if not found return 0 */
+	jmp .Lsden_dibp_not_found
+
+.Lsden_dibp_err:
+	xorl %eax,%eax					/* xor clears the cf, needs to be done now */
+	stc
+	jmp .Lsden_dibp_end
+
+.Lsden_dibp_not_found:
+	xorl %eax,%eax
+
+.Lsden_dibp_end:
+	popl %ebp
+	popl %ebx
+	popl %edi
+	popl %esi
+
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pushf
+		pusha
+		movw $(ext2_walk_dir_entry_nohash_dibp_byedbg), %ax
+		call puts16
+		popa
+		popf
+		.endif
+	.endif
+	ret
+.endfunc
+
+/* int ext2_walk_dir_entry_nohash_tibp(char* buf, char* matchstr)
+ *
+ * search matchstr in single indirect data block
+ *
+ * returns: inode if OK, 0 otherwise
+*/
+.global ext2_walk_dir_entry_nohash_tibp
+.func ext2_walk_dir_entry_nohash_tibp
+ext2_walk_dir_entry_nohash_tibp:
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pusha
+		pushw %dx
+		pushw $ADDR_TIBPBUF
+		pushw %ax
+		pushw $(ext2_walk_dir_entry_nohash_tibp_hellodbg)
+		call printf16
+		addw $8, %sp
+		popa
+		.endif
+	.endif
+
+	pushl %esi
+	pushl %edi
+	pushl %ebx
+	pushl %ebp
+
+	movl %eax, %esi					/* esi: block buffer full of TIBP entries */
+	movl %edx, %edi					/* edi: matchstr */
+
+	/* determine how many block ids fit to blocksize */
+	movl (l_ext2_sb_blocksize), %eax		/* block_size/sizeof(int32t) */
+	shr $2, %eax
+	movl %eax, %ebp					/* ebp: block_entries */
+	xorl %ebx, %ebx					/* ebx: current entry, "i" */
+
+	/* go through each indirect entry */
+.Lsden_tibp_loop:
+
+	cmp %ebp, %ebx
+	jnb .Lsden_tibp_not_found			/* we went through all entries and didn't find it */
+
+	movl (%esi), %eax				/* eax: current block id */
+	testl %eax, %eax				/* skip over empty entry */
+	jz .Lsden_tibp_keeplooking
+
+	/* take a blockid and load ADDR_TIBPBUF with it */
+	movl $ADDR_TIBPBUF, %edx			/* edx: use ADDR_TIBPBUF as new block buffer */
+	call ext2_access_block
+	jc .Lsden_tibp_err				/* abort on error */
+
+	movl %edi, %edx					/* matchstr */
+	call ext2_walk_dir_entry_nohash_sibp
+	jc .Lsden_tibp_err				/* abort on error */
+	test %eax, %eax
+	jnz .Lsden_tibp_end				/* we found the entry */
+
+.Lsden_tibp_keeplooking:
+	addl $4, %esi					/* move to next blockid */
+	inc %ebx					/* i++ */
+	jmp .Lsden_tibp_loop
+
+	/* if not found return 0 */
+	jmp .Lsden_tibp_not_found
+
+.Lsden_tibp_err:
+	xorl %eax,%eax					/* xor clears the cf, needs to be done now */
+	stc
+	jmp .Lsden_tibp_end
+
+.Lsden_tibp_not_found:
+	xorl %eax,%eax
+
+.Lsden_tibp_end:
+	popl %ebp
+	popl %ebx
+	popl %edi
+	popl %esi
+
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pushf
+		pusha
+		movw $(ext2_walk_dir_entry_nohash_tibp_byedbg), %ax
+		call puts16
+		popa
+		popf
+		.endif
+	.endif
+	ret
+.endfunc
+
+
 /* int ext2_access_inode(int inum, struct* inode, char* blockbuf)
  *
- * figures out the location of the inode on disk, copies the inode to inode structure
- * when found. uses blockbuf to store access_block() data
+ * Searches for the inode inum. If found inode structure is updated.
+ * To cache block access blockbuf is used.
  *
- * returns 0: OK
+ * returns 0: OK, on error CF is set
 */
 .global ext2_access_inode
 .func ext2_access_inode
 ext2_access_inode:
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pusha
+		pushl %ecx
+		pushl %eax
+		pushw $(ext2_access_inode_hellodbg)
+		call printf16
+		addw $10, %sp
+		popa
+		.endif
+	.endif
+
 	pushl %esi
 	pushl %edi
 	pushl %ebp
@@ -874,18 +1265,24 @@ ext2_access_inode:
 
 	test %eax,%eax						/* inum can't be 0 */
 	jnz .Lai_not0
-	sete %al
 
+.Lai_err:
 	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
 		pushl %eax
 		movw $(ext2_access_inode_msg_err2), %ax
 		call puts16
 		popl %eax
+		.endif
 	.endif
-	jmp .Lai_end
+
+	/* used for all errors in this function */
+.Lai_err_cleanup:
+	addl $20, %esp
+	stc
+	jmp .Lai_end2
 
 .Lai_not0:
-
 	movl %eax, %edi						/* save inum for later */
 	movl %edx, %esi						/* save struct* inode for later */
 	movl %ecx, -16(%ebp)					/* block buffer */
@@ -909,6 +1306,7 @@ ext2_access_inode:
 	movl %edx, -12(%ebp)					/* idx2: inode index within block */
 
 	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
 		pushw %dx
 		pushw -4(%ebp)
 		pushw %ax
@@ -917,29 +1315,29 @@ ext2_access_inode:
 		pushw $(ext2_access_inode_msg)
 		call printf16
 		addw $12, %sp
+		.endif
 	.endif
 
 	movl (%ebp), %eax
 	call ext2_access_gde
 	test %ax, %ax
-	jz .Lai_agok
+	jz .Lai_agok						/* CF is ignored on access_gde, ax indicates error though */
 
-	pushw %ax
+	pushw %ax						/* first error message is print */
 	pushw %di
 	pushw $(ext2_access_inode_msg_err)
 	call printf16
 	addw $4, %sp
-	popw %ax					/* error from ext2_access_gde */
-	jmp .Lai_end
+	popw %ax						/* error from ext2_access_gde */
+	jmp .Lai_err_cleanup					/* jump to error code, set CF and exit */
 
-.global .Lai_agok
 .Lai_agok:
 	movl (l_bg_inode_table), %eax			/* l_bg_inode_table + bix */
 	addl -8(%ebp), %eax
 	movl -16(%ebp), %edx				/* block buffer */
 	call ext2_access_block
 	test %ax,%ax
-	jz .Lai_end
+	jz .Lai_err_cleanup
 
 .Lai_abok:
 	/* eax points to the buffer of read inodes, idx2 indexes it to the correct one */
@@ -951,8 +1349,11 @@ ext2_access_inode:
 	movw (w_ext2_sb_inode_size), %cx
 	call memcpy16
 	xorl %eax,%eax					/* indicate success */
+
 .Lai_end:
 	addl $20, %esp
+
+.Lai_end2:
 	popl %ebp
 	popl %edi
 	popl %esi
@@ -969,16 +1370,20 @@ ext2_access_inode:
 .global ext2_access_gde
 .func ext2_access_gde
 ext2_access_gde:
-	pushl %edi
-	pushl %ebx
-	movl %eax, %ebx						/* save for later */
-
 	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pusha
 		pushl %eax
 		pushw $(ext2_dbg_access_gde_msg0)
 		call printf16
 		addw $6,%sp
+		popa
+		.endif
 	.endif
+
+	pushl %edi
+	pushl %ebx
+	movl %eax, %ebx						/* save for later */
 
 	/* LBA of the blockid: (blkdid*group_desc_sz)/512 + LBA_global_descriptor_table */
 	xorl %edx,%edx
@@ -991,12 +1396,14 @@ ext2_access_gde:
 	addl (l_ext2_bgdt_lba_start), %eax
 
         .ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
 		pushl %edx
 		pushw %bx
 		pushl %eax
 		pushw $(ext2_dbg_access_gde_msg)
 		call printf16
 		addw $12, %sp
+		.endif
 	.endif
 
 	/* readdisk(LBA where block_group id resides, nr of sectors, buf) */
@@ -1029,14 +1436,21 @@ ext2_access_gde:
 .global ext2_access_block
 .func ext2_access_block
 ext2_access_block:
-	.ifdef DEBUG_EXT2
-		pushw %dx
+	/* debug hello message */
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
+		pushl %ecx
+		movw 4(%esp), %cx			/* note: call was 16b */
+		pushl %edx
 		pushl %eax
-		pushw $(ext2_dbg_access_block_msg)
+		pushw %cx
+		pushw $(ext2_access_block_hellodbg)
 		call printf16
-		popw %ax				/* dummy pop */
+		addw $4, %sp
 		popl %eax				/* restore eax */
-		popw %dx
+		popl %edx				/* restore edx */
+		popl %ecx				/* restore ecx */
+		.endif
 	.endif
 
 	movl (l_ext2_sb_blocks_count), %ecx
@@ -1055,21 +1469,30 @@ ext2_access_block:
 	movl %eax, (q_dap_start)
 	movw $SECTORS_IN_BUF, (w_dap_sectors)
 
-	.ifdef DEBUG_EXT2
+	.ifdef DEBUG_VERBOSE
+		.if DEBUG_VERBOSE > 2
 		pushl %eax
 		pushw $(ext2_access_block_lba)
 		call printf16
 		addw $6, %sp
+		.endif
 	.endif
 
         leaw (lba_dap), %dx
         movw (w_bp_disk), %ax
         call diskread16					/* errno16 and ax set in case of an error */
-
 	test %ax, %ax
 	jz .Lab_readok
-	xor %eax, %eax
-	jmp .Lab_end
+
+	.ifdef DEBUG_VERBOSE
+		pushw %ax
+		pushw $(ext2_access_block_err)
+		call printf16
+		addw $4, %sp
+	.endif
+
+	xor %eax, %eax					/* returns NULL in case of error (ax gets lots but errno is set) */
+	jmp .Lab_stcend
 
 .Lab_readok:
 	movzxw (w_dap_buf), %eax			/* address used for read is still saved in DAP */
@@ -1077,12 +1500,15 @@ ext2_access_block:
 
 .Lab_oor:
 	/* blockid out of range */
-	pushl %edx
+	pushl %ecx
 	pushl %eax
 	pushw $(ext2_access_block_oor)
 	call printf16
 	addw $10, %sp
 	xorl %eax,%eax
+
+.Lab_stcend:
+	stc						/* indicate error */
 .Lab_end:
 	ret
 .endfunc
@@ -1101,7 +1527,7 @@ ext2_readdisk:
 	movl %eax, (q_dap_start)
 
 	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 1
+		.if DEBUG_VERBOSE > 2
 			pushw (w_dap_sectors)
 			pushl (q_dap_start)
 			pushw (w_dap_buf)
@@ -1236,42 +1662,86 @@ dbg_ext2_show_gbdt:
 		.gd_pad:		.long 0,0,0	/* not used here but space kept so the struct is 32B */
 	ext2_sz_group_desc = . - ext2_group_desc	/* keep the sizeof(ext2_group_desc) */
 
+
+	l_addr_token:			.long 0		/* this is a an address of the token we use in strtok32_r */
 	b_ext2_symlink_depth:		.byte 0		/* how many itterations did we do handling symlink already */
 
 	/* ext2_init_module() */
 	ext2_init_part_toobig:		.asciz	"ext2: partition spreads beyond 32b lba, unsupported by this driver.\r\n"
 	ext2_init_nomagic:		.asciz	"ext2: no magic signature found.\r\n"
-	ext2_init_bsize_unsupported:	.asciz	"ext2: unsupported block size: %d\r\n"
 	ext2_init_fs_state_unclean:	.asciz	"ext2: warning: filesystem was not unmounted properly.\r\n" 
-	ext2_init_fs_state_okenough:	.asciz	"ext2: ok to proceed anyway, error handling code: %d\r\n"
+
+	.ifdef DEBUG_VERBOSE
+		ext2_init_bsize_unsupported:	.asciz	"ext2: unsupported block size: %d\r\n"
+		ext2_init_fs_state_okenough:	.asciz	"ext2: ok to proceed anyway, error handling code: %d\r\n"
+	.endif
 
 	/* ext2_access_block() */
-	ext2_dbg_access_block_msg:	.asciz	"access_block: searching for blkid: 0x%lx, buf: 0x%x\r\n"
-	ext2_access_block_lba:		.asciz	"access_block: accessing LBA 0x%lx\r\n"
-	ext2_access_block_oor:		.asciz	"oops: access_block: block 0x%lx out of range (0x%lx)\r\n"
+	.ifdef DEBUG_VERBOSE
+		ext2_access_block_hellodbg:	.asciz	"access_block: called by 0x%x, blkid: 0x%lx, buf: 0x%x\r\n"
+		ext2_access_block_lba:		.asciz	"access_block: accessing LBA 0x%lx\r\n"
+		ext2_access_block_err:		.asciz	"oops: access_block: error code: 0x%lx\r\n"
+	.endif
+	ext2_access_block_oor:			.asciz	"oops: access_block: block 0x%lx out of range (0x%lx)\r\n"
 
 	/* ext2_ext2_access_gde() */
-	ext2_dbg_access_gde_msg0:	.asciz	"access_gde: searching for blockid: 0x%lx\r\n"
-	ext2_dbg_access_gde_msg:	.asciz	"access_gde: LBA: 0x%lx, blockgroup: %d, offset: 0x%lx\r\n"
+	ext2_dbg_access_gde_msg0:		.asciz	"access_gde: searching for blockid: 0x%lx\r\n"
+	ext2_dbg_access_gde_msg:		.asciz	"access_gde: LBA: 0x%lx, blockgroup: %d, offset: 0x%lx\r\n"
 
 	/* ext2_access_inode() */
-	ext2_access_inode_msg:		.asciz	"access_inode: inum %d is in block group %d, offset within block: %d, inode index %d, rel index: %d\r\n"
-	ext2_access_inode_msg_err:	.asciz	"access_inode: failed to access group descriptor entry for inum: %d\r\n"
-	ext2_access_inode_msg_err2:	.asciz	"access_inode: invalid inum 0\r\n"
+	ext2_access_inode_hellodbg:		.asciz	"access_inode: start: inum: 0x%lx, buf: 0x%lx\r\n"
+	ext2_access_inode_msg:			.asciz	"access_inode: inum %d is in block group %d, offset within block: %d, inode index %d, rel index: %d\r\n"
+	ext2_access_inode_msg_err:		.asciz	"access_inode: failed to access group descriptor entry for inum: %d\r\n"
+	ext2_access_inode_msg_err2:		.asciz	"access_inode: invalid inum 0\r\n"
 
-	/* ext2_search_dir_entry() */
-	ext2_search_dir_entry_msg:	.asciz	"search_dir_entry: search for %s, buf: 0x%lx\r\n"
-	ext2_search_dir_entry_msg_sidp:	.asciz	"search_dir_entry: proceeding to SIDP\r\n"
-	ext2_search_dir_entry_err:	.asciz	"search_dir_entry: inode not a directory\r\n"
-	ext2_search_dir_entry_err2:	.asciz	"search_dir_entry: failed to access block 0x%lx\r\n"
+	/* ext2_search_in_dirnode() */
+	ext2_search_in_dirnode_hellodbg: 	.asciz  "search_in_dirnode: called by 0x%x: buf: 0x%x, string: >%s<\r\n"
+	ext2_search_in_dirnode_sibp_empty:	.asciz	"search_in_dirnode: dirnode's SIBP entry empty\r\n"
+	ext2_search_in_dirnode_dibp_empty:	.asciz	"search_in_dirnode: dirnode's DIBP entry empty\r\n"
+	ext2_search_in_dirnode_tibp_empty:	.asciz	"search_in_dirnode: dirnode's TIBP entry empty\r\n"
+	ext2_search_in_dirnode_msg_sibp:	.asciz	"search_in_dirnode: proceeding to SIBP\r\n"
+	ext2_search_in_dirnode_msg_dibp:	.asciz	"search_in_dirnode: proceeding to DIBP\r\n"
+	ext2_search_in_dirnode_msg_tibp:	.asciz	"search_in_dirnode: proceeding to TIBP\r\n"
+	ext2_search_in_dirnode_err:		.asciz	"search_in_dirnode: inode not a directory\r\n"
+	ext2_search_in_dirnode_err2:		.asciz	"search_in_dirnode: failed to access block 0x%lx\r\n"
+	ext2_search_in_dirnode_err3:		.asciz	"search_in_dirnode: critical error detected.\r\n"
 
-	/* ext2_search_dir_entry_nohash() */
-	ext2_search_dir_entry_nohash_err:	.asciz	"search_dir_entry_nohash: oops: dir entry size is 0\r\n"
-	ext2_search_dir_entry_nohash_found:	.asciz	"search_dir_entry_nohash: %s found: inode: 0x%lx\r\n"
-	ext2_search_dir_entry_nohash_debug:	.asciz	"search_dir_entry_nohash: comparing: %s\r\n"
+	/* ext2_walk_dir_entry_nohash() */
+	ext2_walk_dir_entry_hellodbg:		.asciz  "walk_dir_entry: called by 0x%x: buf: 0x%x, string: >%s<\r\n"
+	ext2_walk_dir_entry_nohash_found:	.asciz	"walk_dir_entry: %s found: inode: 0x%lx\r\n"
+	ext2_walk_dir_entry_nohasg_err:		.asciz	"walk_dir_entry: error: found dir entry with len 0\r\n"
+
+	/* ext2_walk_dir_entry_nohash_sibp() */
+	ext2_walk_dir_entry_nohash_sibp_hellodbg:	.asciz	"walk sibp: walking buf: 0x%x, my buf: 0x%x, str: %s\r\n"
+	ext2_walk_dir_entry_nohash_sibp_byedbg:		.asciz	"walk sibp: bye.\r\n"
+
+	/* ext2_walk_dir_entry_nohash_dibp() */
+	ext2_walk_dir_entry_nohash_dibp_hellodbg:	.asciz	"walk dibp: walking buf: 0x%x, my buf: 0x%x, str: %s\r\n"
+	ext2_walk_dir_entry_nohash_dibp_byedbg:		.asciz	"walk dibp: bye.\r\n"
+
+	/* ext2_walk_dir_entry_nohash_tibp() */
+	ext2_walk_dir_entry_nohash_tibp_hellodbg:	.asciz	"walk tibp: walking buf: 0x%x, my buf: 0x%x, str: %s\r\n"
+	ext2_walk_dir_entry_nohash_tibp_byedbg:		.asciz	"walk tibp: bye.\r\n"
 
 	/* ext2_handle_symlink() */
-	ext2_handle_symlink_err:	.asciz	"handle_symlink: too many levels of symbolic links: %d\r\n"
+	ext2_handle_symlink_err:		.asciz	"handle_symlink: too many levels of symbolic links: %d\r\n"
+	ext2_handle_symlink_name_toolong:	.asciz	"handle_symlink: name too long: %d/%d\r\n"
+	ext2_handle_symlink_newpath:		.asciz	"handle_symlink: new path: %s\r\n"
+
+	/* ext2_search_file() */
+	ext2_search_file_path_toolong:		.asciz	"oops: search path too long\r\n"
+	ext2_search_file_name_toolong:		.asciz	"oops: filename too long\r\n"
+	ext2_search_file_rootofailed:		.asciz	"oops: failed to open root directory\r\n"
+	ext2_search_file_genericerr:		.asciz	"oops: search_file: error occured\r\n"
+	ext2_search_file_rootnotdir:		.asciz	"oops: root inode not a directory\r\n"
+	ext2_search_file_unk_inodetype:		.asciz	"oops: unknown inode type: 0x%x\r\n"
+	ext2_search_file_path_notdir:		.asciz	"oops: %s not a directory\r\n"
+	ext2_search_file_path_isdir:		.asciz	"oops: %s is a directory\r\n"
+
+	/* readdisk() */
+	.ifdef DEBUG_VERBOSE
+		dbgmsg_ext2_readdiskstats:	.asciz	"ext2_readdisk: buf: 0x%x, LBA: 0x%lx, sectors: %d\r\n"
+	.endif
 
 	/* generic */
 	ext2_block_entries_in_blocksize_msg:	.asciz	"block entries in blocksize: %d\r\n"
@@ -1302,13 +1772,9 @@ dbg_ext2_show_gbdt:
 				.ascii	"  free inodes: %d\r\n"
 				.asciz	"  used dirs: %d\r\n"
 
-	.ifdef DEBUG_VERBOSE
-		dbgmsg_ext2_readdiskstats:	.asciz	"ext2_readdisk: buf: 0x%x, LBA: 0x%lx, sectors: %d\r\n"
-	.endif
-
 	/* character used to split path with */
 	ext2_path_delim:	.asciz	"/"
 
 .section .bss
 	/* buffer to hold the path that is being searched. */
-	pathbuf:	.skip	MAX_PATH
+	pathbuf:	.skip	PATH_MAX
