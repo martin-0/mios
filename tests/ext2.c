@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
 			printf("%s is in inode %d\n", token, inum);
 		}
 
-		printf("lookign up inum: %d\n", inum);
+		printf("looking up inum: %d\n", inum);
 		if ((access_inode(fd, inum, &inode, &bbuf)) != 0) {
 			printf("failed to access inode %d\n", inum);
 			goto out;
@@ -472,7 +472,7 @@ int access_gde(int fd, int bg, struct ext2_group_desc* gd_entry) {
 		return -2;
 	}
 
-	#ifdef DBEUG
+	#ifdef DEBUG
 		printf("access_gde: block group: %d\n", bg);
 		show_gde(gd_entry,0);
 	#endif
