@@ -3,7 +3,7 @@ My **attempt** to write something. Calling it an OS would be .. overstatement. I
 
 ## Current TODO
 **ext2 boot module** - I'm able to find the file in path including the symlink. Few tests were done, all ok.
-** elf parser/loader** - time to write the ELF parser/loader that will load the kernel to desired location. Then I can finally work on the kernel part again.
+**elf parser/loader** - time to write the ELF parser/loader that will load the kernel to desired location. Then I can finally work on the kernel part again.
 
 ### To run the VM
 ```sh
