@@ -1312,6 +1312,10 @@ strtok32_r:
 	movl %esi, (%ebp)		/* ext ptr will start in place of esi+1 */
 	decl %esi
 	movb %al,(%esi)			/* mark the end of str where delim was */
+
+	cmpb $0, (%ebp)
+	jz .Lstrtok32r_retnull		/* if we don't have any next token return null */
+
 	movl %ecx, %eax			/* return val is the orig trimmed str */
 	jmp .Lstok32r_end
 
