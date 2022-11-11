@@ -1151,6 +1151,30 @@ diskinfo16:
 
 /* Functions that use 32b registers. */
 
+/* void memcpy32(void *dst, void* src, uint32_t bytes)
+ *
+ * copy n bytes from source to destination.
+*/
+.global memcpy32
+.func memcpy32
+memcpy32:
+	pushl %esi
+	pushl %edi
+
+	movl %eax, %edi
+	movl %edx, %esi				/* ecx is already set */
+
+.Lmemcpy32:
+	lodsb
+	stosb
+	loop .Lmemcpy32
+
+	movl %edx, %eax				/* ret ptr to dst */
+	popl %edi
+	popl %esi
+	ret
+.endfunc
+
 /* char* strcpy32(char* dst, char* src)
  *
  * Copy src to dst, terminate with null byte. Dst has to be at least len(src)+1 bytes big, no
