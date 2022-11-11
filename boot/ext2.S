@@ -36,13 +36,8 @@
    XXX: make all functions description follow the same layout
 
 */
-	.set ADDR_TIBPBUF, 0x2000
-	.set ADDR_READBUF, 0x3000
-	.set ADDR_BLOCBUF, 0x4000
-	.set ADDR_SIBPBUF, 0x5000
-	.set ADDR_DIBPBUF, 0x6000
-	.set ADDR_DIRNODE, 0x7000
-	.set ADDR_INODE,0x7100
+
+.include "gboot.inc"
 
 	.set EXT2_MAGIC, 0xef53
 	.set EXT2_SIZE_LOG_UNIT, 1024			/* block size: EXT2_SIZE_LOG_UNIT << s_log_block_size */
@@ -59,15 +54,9 @@
 	.set EXT2_SB_OSFT_REV_LEVEL, 0x4c		/* s_rev_level */
 	.set EXT2_SB_OFST_INODE_SZ, 0x58		/* s_inode_size */
 
-	.set EXT2_DENTRY_OFST_INODE, 0			/* offset to inode in directory entry */
-	.set EXT2_DENTRY_OFST_SIZE, 4			/* size of the current directory entry */
-	.set EXT2_DENTRY_OFST_NAMELEN, 6		/* len of the name entry */
-	.set EXT2_DENTRY_OFST_NAME, 8			/* name of the entry being described */
-
 	.set SECTORSZ, 512				/* disk sector size */
-	.set BUFSZ, 0x1000
 	.set PAGE_SIZE, 0x1000
-	.set SECTORS_IN_BUF, 8				/* statically computed from BUFSZ/512 = 8 */
+	.set SECTORS_IN_BUF, 8				/* statically computed from PAGE_SIZE/512 = 8; buffers are PAGE_SIZE big */
 
 	/* enums */
 	.set ETOOBIG, 1
@@ -79,15 +68,6 @@
 	.set ENOBLCPG, 7
 	.set ENOINOPG, 8
 	.set EBLKINODE, 9
-
-	.set INODE_OSFT_TYPEPERM, 0			/* inode offset to type and permissions */
-	.set INODE_OFST_ISIZE, 0x4			/* inode offset to i_size */
-	.set INODE_OFST_DBP_0, 0x28			/* inode offset to direct block pointer 0 */
-	.set INODE_OSFT_SIBP, 0x58			/* inode offset to single indirect block pointer */
-	.set INODE_OSFT_DIBP, 0x5c			/* inode offset to double indirect block pointer */
-	.set INODE_OSFT_TIBP, 0x60			/* inode offset to triple indirect block pointer */
-
-	.set DIR_OFST_RECLEN, 4				/* offset to reclen in directory inode */
 
 	/* inode mode */
 	.set S_IFMT, 0xF000				/* mask to be used for inode.i_mode */
@@ -131,7 +111,7 @@ ext2_initmod:
 
 	movw $(ext2_init_part_toobig), %ax
 	call puts16
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		pushw (w_bp_disk)
 		pushl (q_part_lba_end)
 		pushl (q_part_lba_end+4)
@@ -151,7 +131,7 @@ ext2_initmod:
 	movl $SECTORS_IN_BUF, %edx
 	movl (q_part_lba_start), %eax			/* set start LBA of partition */
 
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		call dbg_ext2_show_partition
 	.endif
 	call ext2_readdisk
@@ -189,7 +169,7 @@ ext2_initmod:
 	jmp .Linitm_end
 
 .Lstate_ok_enough:
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		pushw %ax
 		pushw $(ext2_init_fs_state_okenough)
 		call printf16
@@ -203,7 +183,7 @@ ext2_initmod:
 	cmpw $PAGE_SIZE, %ax				/* blocksize has to be <= PAGE_SIZE */
 	jbe .Lbs_ok
 
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		pushw %ax
 		pushw $(ext2_init_bsize_unsupported)
 		call printf16
@@ -324,11 +304,11 @@ ext2_initmod:
 	ret
 .endfunc
 
-/* int ext2_search_file(char* filepath)
+/* struct inode*  ext2_search_file(char* filepath)
  *
- * search for the file in the filepath. filepath has to be an absolute path
+ * search for the file in the filepath. filepath has to be an absolute path. if found return the struct inode pointer.
  *
- * returns: inode if OK, 0 otherwise
+ * returns: ptr to inode if OK, NULL otherwise
 */
 .global ext2_search_file
 .func ext2_search_file
@@ -349,6 +329,7 @@ ext2_search_file:
 	call strcpy32
 
 	movl $pathbuf, %edi					/* edi: token: starts as pathbuf */
+	movb $0,(b_ext2_symlink_depth)				/* initialize b_ext2_symlink_depth */
 
 .Lsf_mainloop:
 	test %edi, %edi
@@ -489,18 +470,19 @@ ext2_search_file:
 	jmp .Lsf_err_end
 
 .Lsf_postloop:
+	// XXX: just some tests for now ..
+	/* we found what we were looking for, ADDR_INODE has inode structure filled in */
+	xorl %edx, %edx
+	movl 4(%ebx), %eax		// size in bytes
+	movl (l_ext2_sb_blocksize), %ecx
+	div %ecx
+	test %edx, %edx
+	jz .Lsf_post1
+	inc %eax
 
-	// INFO: if i get here file was found
-
-	// /* char* access_block(unsigned int blockid, char* buf)
-	movl $ADDR_BLOCBUF, %edx
-	movl $ADDR_INODE,%ebx
-	movl INODE_OFST_DBP_0(%ebx), %eax	/* block0 of ELF */
-	call ext2_access_block
-
-	movw $16, %dx
-	call dump_mem16
-
+.Lsf_post1:
+	/* all OK, return */
+	movl %ebx, %eax
 	jmp .Lsf_end
 
 	/* handle errors */
@@ -607,11 +589,13 @@ ext2_handle_symlink:
 	movl $pathbuf, %eax
 	call strcpy32
 
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 1
 		pushw $ADDR_TIBPBUF
 		pushw $(ext2_handle_symlink_newpath)
 		call printf16
 		addw $4, %sp
+		.endif
 	.endif
 
 	/* pathbuf is now updated. strtok routine has to be updated now in search_file() */
@@ -660,7 +644,8 @@ ext2_handle_symlink:
 .global ext2_search_in_dirnode
 .func ext2_search_in_dirnode
 ext2_search_in_dirnode:
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 1
 		pushl %esi
 		movw 4(%esp), %si		// caller
 		pushw %dx
@@ -670,6 +655,7 @@ ext2_search_in_dirnode:
 		call printf16
 		addw $8, %sp
 		popl %esi
+		.endif
 	.endif
 
 	pushl %esi
@@ -710,7 +696,7 @@ ext2_search_in_dirnode:
 	call ext2_access_block
 	jnc .Lsde_search_direct_blocks.abok		/* handle error */
 
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		pushl (%ebx)				/* display error and return 0 */
 		pushw $(ext2_search_in_dirnode_err2)
 		call printf16
@@ -736,8 +722,8 @@ ext2_search_in_dirnode:
 	/* direct blocks search didn't yield any results, need to check indirect ones */
 
 	/* SIBP */
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 1
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 1
 		movw $(ext2_search_in_dirnode_msg_sibp), %ax
 		call puts16
 		.endif
@@ -748,8 +734,8 @@ ext2_search_in_dirnode:
 	testl %eax, %eax				/* skip over unused entry */
 	jnz .Lsde_search_sibp_ok
 
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 1
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 1
 		movw $(ext2_search_in_dirnode_sibp_empty), %ax
 		call puts16
 		xorl %eax,%eax
@@ -771,8 +757,8 @@ ext2_search_in_dirnode:
 
 	/* DIBP */
 .Lsde_handle_dibp:
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 1
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 1
 		movw $(ext2_search_in_dirnode_msg_dibp), %ax
 		call puts16
 		.endif
@@ -781,8 +767,8 @@ ext2_search_in_dirnode:
 	movl INODE_OSFT_DIBP(%esi), %eax
 	testl %eax, %eax
 	jnz .Lsde_search_dibp_ok
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 1
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 1
 		movw $(ext2_search_in_dirnode_dibp_empty), %ax
 		call puts16
 		xorl %eax,%eax
@@ -803,8 +789,8 @@ ext2_search_in_dirnode:
 .Lsde_handle_tibp:
 
 	/* TIBP */
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 1
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 1
 		movw $(ext2_search_in_dirnode_msg_tibp), %ax
 		call puts16
 		.endif
@@ -814,8 +800,8 @@ ext2_search_in_dirnode:
 	testl %eax,%eax
 	jnz .Lsde_search_tibp_ok
 
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 1
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 1
 		movw $(ext2_search_in_dirnode_tibp_empty), %ax
 		call puts16
 		xorl %eax,%eax
@@ -866,8 +852,8 @@ ext2_search_in_dirnode:
 .global ext2_walk_dir_entry_nohash
 .func ext2_walk_dir_entry_nohash
 ext2_walk_dir_entry_nohash:
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushl %ecx
 		movw 4(%esp), %cx
 
@@ -935,8 +921,8 @@ ext2_walk_dir_entry_nohash:
 
 .Lsden_found:
 	movl (%esi,%ebx), %eax					/* inode */
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushf
 		pushl %eax
 		pushl %eax
@@ -967,8 +953,8 @@ ext2_walk_dir_entry_nohash:
 .global ext2_walk_dir_entry_nohash_sibp
 .func ext2_walk_dir_entry_nohash_sibp
 ext2_walk_dir_entry_nohash_sibp:
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pusha
 		pushw %dx
 		pushw $ADDR_SIBPBUF
@@ -1037,8 +1023,8 @@ ext2_walk_dir_entry_nohash_sibp:
 	popl %edi
 	popl %esi
 
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushf
 		pusha
 		movw $(ext2_walk_dir_entry_nohash_sibp_byedbg), %ax
@@ -1059,8 +1045,8 @@ ext2_walk_dir_entry_nohash_sibp:
 .global ext2_walk_dir_entry_nohash_dibp
 .func ext2_walk_dir_entry_nohash_dibp
 ext2_walk_dir_entry_nohash_dibp:
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pusha
 		pushw %dx
 		pushw $ADDR_DIBPBUF
@@ -1129,8 +1115,8 @@ ext2_walk_dir_entry_nohash_dibp:
 	popl %edi
 	popl %esi
 
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushf
 		pusha
 		movw $(ext2_walk_dir_entry_nohash_dibp_byedbg), %ax
@@ -1151,8 +1137,8 @@ ext2_walk_dir_entry_nohash_dibp:
 .global ext2_walk_dir_entry_nohash_tibp
 .func ext2_walk_dir_entry_nohash_tibp
 ext2_walk_dir_entry_nohash_tibp:
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pusha
 		pushw %dx
 		pushw $ADDR_TIBPBUF
@@ -1221,8 +1207,8 @@ ext2_walk_dir_entry_nohash_tibp:
 	popl %edi
 	popl %esi
 
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushf
 		pusha
 		movw $(ext2_walk_dir_entry_nohash_tibp_byedbg), %ax
@@ -1245,8 +1231,8 @@ ext2_walk_dir_entry_nohash_tibp:
 .global ext2_access_inode
 .func ext2_access_inode
 ext2_access_inode:
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pusha
 		pushl %ecx
 		pushl %eax
@@ -1267,8 +1253,8 @@ ext2_access_inode:
 	jnz .Lai_not0
 
 .Lai_err:
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushl %eax
 		movw $(ext2_access_inode_msg_err2), %ax
 		call puts16
@@ -1305,8 +1291,8 @@ ext2_access_inode:
 	movl %eax, -8(%ebp)					/* bix: block index */
 	movl %edx, -12(%ebp)					/* idx2: inode index within block */
 
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushw %dx
 		pushw -4(%ebp)
 		pushw %ax
@@ -1370,8 +1356,8 @@ ext2_access_inode:
 .global ext2_access_gde
 .func ext2_access_gde
 ext2_access_gde:
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pusha
 		pushl %eax
 		pushw $(ext2_dbg_access_gde_msg0)
@@ -1395,8 +1381,8 @@ ext2_access_gde:
 	movl %edx, %edi						/* offset within given LBA */
 	addl (l_ext2_bgdt_lba_start), %eax
 
-        .ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+        .ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushl %edx
 		pushw %bx
 		pushl %eax
@@ -1437,8 +1423,8 @@ ext2_access_gde:
 .func ext2_access_block
 ext2_access_block:
 	/* debug hello message */
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushl %ecx
 		movw 4(%esp), %cx			/* note: call was 16b */
 		pushl %edx
@@ -1469,8 +1455,8 @@ ext2_access_block:
 	movl %eax, (q_dap_start)
 	movw $SECTORS_IN_BUF, (w_dap_sectors)
 
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 		pushl %eax
 		pushw $(ext2_access_block_lba)
 		call printf16
@@ -1484,7 +1470,7 @@ ext2_access_block:
 	test %ax, %ax
 	jz .Lab_readok
 
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		pushw %ax
 		pushw $(ext2_access_block_err)
 		call printf16
@@ -1526,8 +1512,8 @@ ext2_readdisk:
 	movw %dx, (w_dap_sectors)
 	movl %eax, (q_dap_start)
 
-	.ifdef DEBUG_VERBOSE
-		.if DEBUG_VERBOSE > 2
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
 			pushw (w_dap_sectors)
 			pushl (q_dap_start)
 			pushw (w_dap_buf)
@@ -1635,6 +1621,7 @@ dbg_ext2_show_gbdt:
 
 	.align 4
 	/* excert from superblock structure ext2_super_block */
+	.global l_ext2_sb_blocksize, l_ext2_sb_blocks_count, l_ext2_sb_blocks_per_group, l_ext2_sb_inodes_per_group, l_ext2_sb_rev_level, w_ext2_sb_inode_size
 	l_ext2_sb_blocksize:		.long 0
 	l_ext2_sb_blocks_count:		.long 0
 	l_ext2_sb_blocks_per_group:	.long 0
@@ -1671,13 +1658,13 @@ dbg_ext2_show_gbdt:
 	ext2_init_nomagic:		.asciz	"ext2: no magic signature found.\r\n"
 	ext2_init_fs_state_unclean:	.asciz	"ext2: warning: filesystem was not unmounted properly.\r\n" 
 
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		ext2_init_bsize_unsupported:	.asciz	"ext2: unsupported block size: %d\r\n"
 		ext2_init_fs_state_okenough:	.asciz	"ext2: ok to proceed anyway, error handling code: %d\r\n"
 	.endif
 
 	/* ext2_access_block() */
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		ext2_access_block_hellodbg:	.asciz	"access_block: called by 0x%x, blkid: 0x%lx, buf: 0x%x\r\n"
 		ext2_access_block_lba:		.asciz	"access_block: accessing LBA 0x%lx\r\n"
 		ext2_access_block_err:		.asciz	"oops: access_block: error code: 0x%lx\r\n"
@@ -1739,7 +1726,7 @@ dbg_ext2_show_gbdt:
 	ext2_search_file_path_isdir:		.asciz	"oops: %s is a directory\r\n"
 
 	/* readdisk() */
-	.ifdef DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		dbgmsg_ext2_readdiskstats:	.asciz	"ext2_readdisk: buf: 0x%x, LBA: 0x%lx, sectors: %d\r\n"
 	.endif
 
