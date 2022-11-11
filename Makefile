@@ -4,7 +4,7 @@ LD=/local/cross/bin/i686-elf-ld
 
 DISK_RAW=disk00.raw
 ROOTFS=/tmp/rootfs
-BLOCKSIZE=1024
+BLOCKSIZE=4096
 
 OBJDIR=obj
 

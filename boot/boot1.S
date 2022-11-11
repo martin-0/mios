@@ -4,6 +4,11 @@
 	.set BUFSZ, 0x1000
 	.set STACK_OFFST, 0x1ffc
 
+
+        // XXX: should be .included from common file or exported as global in ext2
+        .set ADDR_BLOCBUF, 0x4000
+        .set ADDR_INODE,0x7100
+
 .section .text
 	.code16
 	.global _start
@@ -311,12 +316,24 @@ _start:
 	movl $(boot_partition), %eax			/* initialize ext2 module */
 	call ext2_initmod				/* int16_t ext2_initmod(boot_partition *bp) */
 
-	//dbg_show_addr .Ldebughint
-	nop
-	nop
+	call dbg_ext2_show_superblock
 
 	movw $(strkernel), %ax
 	call ext2_search_file				/* ext2_search_file("/boot/kernel") */
+	testw %ax,%ax
+	jz .Lnokernel
+
+	/* ax: inode structure */
+	call elf32_load_file
+
+	cli
+	hlt
+
+.Lnokernel:
+	pushw $(strkernel)
+	pushw $(fatal_nokernel)
+	call printf16
+	/* fall through to halt */
 
 haltme:
 	movw $(debug_info_halt), %ax
@@ -329,12 +346,8 @@ haltme:
 	call puts16
 	jmp panic16
 
-off:
-	cli
-	hlt
-	jmp off
 
-/* void* bufsearch(int16_t n)
+/* void* search_uuid_buf(int16_t n)
  *
  * search for partition uuid in the cache; returns ptr to the partition header if found, NULL otherwise
 */
@@ -514,6 +527,7 @@ panic16:
 	fatal_secsize:	.asciz	"Unsupported sector size detected: %d\r\n"
 	fatal_bufsz:	.asciz	"Buffer too small, unable to cache partition data.\r\n"
 	fatal_nopart:	.asciz	"Failed to find MIOS partition, aborting.\r\n"
+	fatal_nokernel:	.asciz	"%s not found.\r\n"
 	msg_bios_err:	.asciz	"BIOS function failed, error code: %x\r\n"
 	msg_mem_err:	.asciz	"Failed to get memory map from BIOS.\r\n"
 
