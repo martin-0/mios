@@ -12,6 +12,7 @@ SECTIONS
 		boot1.o(.*)
 		libsa16.o(.*)
 		ext2.o(.*)
+		elf32.o(.*)
 	}
 
 	/* Discard common unwanted/unneeded sections */
