@@ -12,12 +12,11 @@ OBJDIR=../obj
 LINKADDR=0x7c00
 
 ASFLAGS=--defsym LINKADDR=$(LINKADDR) --defsym DEBUG_VERBOSE=1
-#ASFLAGS=--defsym LINKADDR=$(LINKADDR)
 
 LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N
 #LDFLAGS=--defsym LINKADDR=$(LINKADDR) -T ../boot/link.ld -N -M
 
-SRCO=boot1.o libsa16.o ext2.o
+SRCO=boot1.o libsa16.o ext2.o elf32.o
 
 .PHONY: pmbr
 all: gboot
@@ -30,8 +29,11 @@ gboot:	$(SRCO)
 boot1.o: boot1.S
 	$(AS) $(ASFLAGS) boot1.S -o $(OBJDIR)/boot1.o
 
-ext2.o: ext2.S
+ext2.o: ext2.S gboot.inc
 	$(AS) $(ASFLAGS) ext2.S -o $(OBJDIR)/ext2.o
+
+elf32.o: elf32.S gboot.inc
+	$(AS) $(ASFLAGS) elf32.S -o $(OBJDIR)/elf32.o
 
 libsa16.o: libsa16.S
 	$(AS) libsa16.S -o $(OBJDIR)/libsa16.o
