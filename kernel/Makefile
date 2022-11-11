@@ -9,10 +9,14 @@ LD=/local/cross/bin/i686-elf-ld
 INCDIR=../include
 OBJDIR=../obj
 
-ASFLAGS=
+# XXX: i don't think my kernel is going to be more than 16MB any time soon but I need to
+# XXX: pay attention about memory holes (15-16MB)..
+LINKADDR=0x100000
+
+ASFLAGS=--32
 #ASFLAGS=--defsym LINKADDR=$(LINKADDR)
 
-LDFLAGS=-T ../kernel/kernlink.ld 
+LDFLAGS=-T ../kernel/kernlink.ld --defsym LINKADDR=$(LINKADDR)
 
 # https://elixir.bootlin.com/linux/v4.20.17/source/arch/x86/Makefile
 CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4 -mregparm=3
@@ -27,10 +31,10 @@ kernel:	$(SRCO)
 	cd $(OBJDIR) && $(LD) $(LDFLAGS) -o kernel $(SRCO)
 
 entry.o: entry.S
-	$(AS) entry.S -o $(OBJDIR)/entry.o
+	$(AS) $(ASFLAGS) entry.S -o $(OBJDIR)/entry.o
 
 idt.o: idt.S
-	$(AS) idt.S -o $(OBJDIR)/idt.o
+	$(AS) $(ASFLAGS) idt.S -o $(OBJDIR)/idt.o
 
 cons.o:	cons.c cons.h
 	$(CC) $(CFLAGS) cons.c -c -o $(OBJDIR)/cons.o

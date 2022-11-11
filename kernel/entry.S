@@ -1,8 +1,10 @@
 /* martin */
 
 .section .text
-	.code16
-	.global _start
+	.code32
+
+.global _kernel_entry
+_kernel_entry:
 
 	/* XXX: WIP: right now this is just a split from boot1.S, I've not worked on this yet. */
 
@@ -14,9 +16,8 @@
 	orl $1, %eax
 	movl %eax, %cr0
 
-	ljmp $8, $(pmode32)			/* flush instruction cache and set the proper cs selector */
+//	ljmpl $8, $(pmode32)			/* flush instruction cache and set the proper cs selector */
 
-	.code32
 pmode32:	
 	movl $0x10, %eax
 	movw %ax, %ds
@@ -24,6 +25,8 @@ pmode32:
 	movw %ax, %ss
 	movw %ax, %fs
 	movw %ax, %gs
+
+	// XXX: now needs to be set elsewhere
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
 	call clrscr
@@ -47,11 +50,10 @@ off:
 	jmp off
 
 .section .data
-
 	/* GDT table definiion */
 	.align 16
-	gdt_desc:	.word	end_gdt-gdt-1			/* size */
-			.word	gdt,0				/* linear address, ptr to gdt */
+	gdt_desc:	.word end_gdt-gdt-1			/* size */
+			.long gdt				/* linear address, ptr to gdt */
 	.align 16
 	gdt:
 		/* base:	32b value, linear address where the segment begins
