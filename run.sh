@@ -54,7 +54,7 @@ if [ "z${MONITOR}" = "z" ]; then
 	MONITOR="${MONITOR_STDIO}"
 fi
 
-qemu-system-i386 -s ${DEBUG} ${MONITOR} ${QDISPLAY} ${EXTRAPARAM} \
+qemu-system-i386 -m 512 -s ${DEBUG} ${MONITOR} ${QDISPLAY} ${EXTRAPARAM} \
 -drive id=disk,file=${DISK},if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0
 
 # -hda disk00.raw
