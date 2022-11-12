@@ -60,6 +60,10 @@ _start:
 	/* Get the system memory map from BIOS */
 	// XXX: I should have more ways of detecting memory, starts with E820 and go down
 	//	to older stuff
+
+	// XXX: this is a problem now - we can't pass the detected memory to kernel
+	// 
+
 	movw $(smap), %ax			/* detect memory with E820 */
 	call getmem_E820
 	test %ax, %ax
