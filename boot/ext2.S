@@ -1424,7 +1424,7 @@ ext2_access_gde:
 ext2_access_block:
 	/* debug hello message */
 	.ifdef EXT2_DEBUG_VERBOSE
-		.if EXT2_DEBUG_VERBOSE > 2
+		.if EXT2_DEBUG_VERBOSE > 0
 		pushl %ecx
 		movw 4(%esp), %cx			/* note: call was 16b */
 		pushl %edx

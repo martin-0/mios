@@ -1149,31 +1149,41 @@ diskinfo16:
 	ret
 .endfunc
 
-/* Functions that use 32b registers. */
 
-/* void memcpy32(void *dst, void* src, uint32_t bytes)
+/* void memcpy_seg(int16 dst_seg, int16* dst, void* src, uint16_t bytes)
  *
- * copy n bytes from source to destination.
+ * operands on stack
 */
-.global memcpy32
-.func memcpy32
-memcpy32:
-	pushl %esi
-	pushl %edi
+.global memcpy_seg
+.func memcpy_seg
+memcpy_seg:
+	pushw %si
+	pushw %di
+	pushw %bx
+	pushw %es
+	movw %sp, %bx				/* to reference arguments */
 
-	movl %eax, %edi
-	movl %edx, %esi				/* ecx is already set */
+	movw 10(%bx), %ax
+	movw %ax, %es 
 
-.Lmemcpy32:
+	movw 12(%bx), %di			/* es:di dst */
+	movw 14(%bx), %si			/* si: src */
+	movw 16(%bx), %cx			/* bytes */
+
+.Lmemcpy_seg:
 	lodsb
 	stosb
-	loop .Lmemcpy32
+	loop .Lmemcpy_seg
 
-	movl %edx, %eax				/* ret ptr to dst */
-	popl %edi
-	popl %esi
+	xorw %ax,%ax
+	popw %es
+	popw %bx
+	popw %di
+	popw %si
 	ret
 .endfunc
+
+/* Functions that use 32b registers. */
 
 /* char* strcpy32(char* dst, char* src)
  *

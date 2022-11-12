@@ -9,11 +9,9 @@ LD=/local/cross/bin/i686-elf-ld
 INCDIR=../include
 OBJDIR=../obj
 
-# XXX: i don't think my kernel is going to be more than 16MB any time soon but I need to
-# XXX: pay attention about memory holes (15-16MB)..
-LINKADDR=0x100000
+LINKADDR=0x20000
 
-ASFLAGS=--32
+ASFLAGS=
 #ASFLAGS=--defsym LINKADDR=$(LINKADDR)
 
 LDFLAGS=-T ../kernel/kernlink.ld --defsym LINKADDR=$(LINKADDR)

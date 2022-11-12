@@ -8,6 +8,16 @@
 	.set E_PHNUM, 		0x2c
 	.set E_SHSTRMDX, 	0x32	
 
+	/* elf32 program header */
+	.set P_TYPE,		0x0
+	.set P_OFFSET,		0x4
+	.set P_VADDR,		0x8
+	.set P_PADDR,		0xc
+	.set P_FILESZ,		0x10
+	.set P_MEMSZ,		0x14
+	.set P_FLAGS,		0x18
+	.set P_ALIGN,		0x1c
+
 .include "gboot.inc"
 	
 .section .text
@@ -18,6 +28,8 @@
 .func elf32_load_file
 elf32_load_file:
 	pushl %esi
+	pushl %edi
+
 	movl %eax, %esi					/* inode */
 
 	xorl %edx, %edx
@@ -52,13 +64,60 @@ elf32_load_file:
 	//	problem: file is being loaded by blocks. while there's good chance program headers will be within
 	//	range of PAGE_SIZE I need to take special care I need to load it .. what if entry lives on cross block?
 
+
+	// XXX: test
+	// XXX: ok, this is wrong .. i thought A20 enabled would give me access to memory above 1MB; that's incorect
+	//	ext2 module should be checked too if maybe i did some wrong assumptions
+
+	movl (l_e_phoff), %edi
+	addl $ADDR_BLOCBUF, %edi					/* start of the program header */
+
+	pushl P_FILESZ(%edi)
+	pushl P_PADDR(%edi)
+	pushl P_OFFSET(%edi)
+	pushw $(foundhdr)
+	call printf16
+	addw $14, %sp
+
+	jmp 1f
+	foundhdr: .asciz "program header: offset: %lx, physaddr: %lx, filesize: %lx\r\n"
+1:
+	movl $ADDR_SIBPBUF, %edx
+	leal INODE_OFST_DBP_0(%esi), %eax
+	movl 4(%eax), %eax
+	call ext2_access_block
+	jc .Llf_end_err
+
+	/* 0x20000 is 2000:0000 */
+	pushw $0x1000
+	pushw $ADDR_SIBPBUF
+	pushw $0
+	pushw $0x2000
+	call memcpy_seg
+	addw $8, %sp
+
+	/* load block 1 */	
+	movl $ADDR_SIBPBUF, %edx
+	leal INODE_OFST_DBP_0(%esi), %eax
+	movl 8(%eax), %eax
+	call ext2_access_block
+	jc .Llf_end_err
+
+	pushw $0x594
+	pushw $ADDR_SIBPBUF
+	pushw $0
+	pushw $0x2100
+	call memcpy_seg
+	addw $8, %sp
+
+	xorl %eax, %eax
 	jmp .Llf_end
 
 .Llf_end_err:
 	movw $1, %ax
 
 .Llf_end:
-
+	popl %edi
 	popl %esi
 	ret
 .endfunc
@@ -137,6 +196,8 @@ elf32_check_header:
 
 .section .data
 	.align 4
+
+	/* saved variables from elf header */
 	l_e_entry:	.long	0	/* entry point for this ELF */
 	l_e_phoff:	.long	0	/* start of the program header table */
 	w_e_phnum:	.word	0	/* number of entries in the program header table */
@@ -149,7 +210,7 @@ elf32_check_header:
 
 
 	.ifdef DEBUG_VERBOSE
-		elf32_ch_info:	.asciz "program header entries: %d, starting at 0x%lx, enty: 0x%lx\r\n"
+		elf32_ch_info:	.asciz "program header entries: %d, starting at 0x%lx, entry: 0x%lx\r\n"
 		elf32_lf_info:	.asciz "elf32_load_file: file size: %d bytes, spread on %d %d-byte blocks\r\n"
 	.endif
 

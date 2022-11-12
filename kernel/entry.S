@@ -1,14 +1,20 @@
 /* martin */
 
 .section .text
-	.code32
+	.code16
 
 .global _kernel_entry
 _kernel_entry:
+	// XXX: I need to split this differently .. gdt entries need to be in boot1 so I can reference it
+	// and load it before doing jump 
+	// pmode32, or new _kernel_entry will be already in 32b 
 
-	/* XXX: WIP: right now this is just a split from boot1.S, I've not worked on this yet. */
+	/* cs:ip should be 0x2000:0000 */
 
 	/* prepare to jump to protected mode */
+
+	movw $0x2000, %ax
+	movw %ax, %ds
 	cli
 	lgdt (gdt_desc)
 
@@ -16,8 +22,9 @@ _kernel_entry:
 	orl $1, %eax
 	movl %eax, %cr0
 
-//	ljmpl $8, $(pmode32)			/* flush instruction cache and set the proper cs selector */
+	ljmpl $8, $(pmode32)			/* flush instruction cache and set the proper cs selector */
 
+	.code32
 pmode32:	
 	movl $0x10, %eax
 	movw %ax, %ds
@@ -53,7 +60,7 @@ off:
 	/* GDT table definiion */
 	.align 16
 	gdt_desc:	.word end_gdt-gdt-1			/* size */
-			.long gdt				/* linear address, ptr to gdt */
+			.word gdt,0				/* linear address, ptr to gdt */
 	.align 16
 	gdt:
 		/* base:	32b value, linear address where the segment begins

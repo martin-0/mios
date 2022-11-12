@@ -325,6 +325,13 @@ _start:
 
 	/* ax: inode structure */
 	call elf32_load_file
+	testw %ax,%ax
+	jnz haltme
+
+	movw $(debug_xxx_test2), %ax
+	call puts16
+
+	ljmp $0x2000, $0
 
 	cli
 	hlt
@@ -551,3 +558,5 @@ panic16:
 	debug_info_halt:	.asciz	"info: system halted for now.\r\n"
 
 	debug_xxx_test:	.asciz	"this is %x, this is %lx\r\n"
+
+	debug_xxx_test2: .asciz	"attemp to jump to kernel\r\n"
