@@ -4,7 +4,7 @@ My **attempt** to write something. Calling it an OS would be .. overstatement. I
 ## Status
 ### loading kernel
 pmbr searches for MIOS boot partition: 736F696D-0001-0002-0003-FEEDCAFEF00D. When found rest of the partition is loaded (upper size limit). gboot then searches for linux ext2 partition as its root partition.<br />
-Kernel is being searched in "/boot/kernel". Symlinks are supported. <br/ ><br />
+Kernel is being searched in "/boot/kernel". Symlinks are supported. <br / ><br />
 
 Right now ELF32 loader statically loads the kernel as it was PoC to see if I can get it working. WIP to load it properly by going through the PT_LOAD entries.<br /><br />
 
