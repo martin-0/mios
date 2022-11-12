@@ -331,7 +331,15 @@ _start:
 	movw $(debug_xxx_test2), %ax
 	call puts16
 
-	ljmp $0x2000, $0
+        cli
+        lgdt (gdt_desc)
+
+        movl %cr0, %eax                         /* enable protected mode */
+        orl $1, %eax
+        movl %eax, %cr0
+
+	nop
+        ljmpl $8, $0x20000			/* flush instruction cache and set the proper cs selector */
 
 	cli
 	hlt
@@ -524,6 +532,58 @@ panic16:
 	rounds:				.word 0		/* how many full passes i can make when reading partitions */
 	leftovers:			.word 0		/* leftover partitons to read */
 
+
+	/* GDT table definiion */
+	.align 16
+	gdt_desc:	.word end_gdt-gdt-1			/* size */
+			.word gdt,0				/* linear address, ptr to gdt */
+	.align 16
+	gdt:
+		/* base:	32b value, linear address where the segment begins
+		 * limit:	20b value, maximum addressable unit, either 1B units or 4k pages 
+		 * access:	description of segment: P | DPL  | S | E | DC | RW | A
+		 * flags:	granularity, db (size flag, 1B or 4k pages), long mode flag, reserved (0)
+		 */
+		.space	8		/* NULL desc */
+
+		/* %cs in kernel mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
+		.byte 0xcf		/* RTL: flags-limit 16-19: , flags: 32b protected mode segment, page granularity */
+		.byte 0			/* base 24-31 */
+
+		/* data in kernel mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
+		.byte 0xcf		/* RTL: flags-limit 16-19: , flags: 32b protected mode segment, page granularity */
+		.byte 0			/* base 24-31 */
+
+		/* %cs in real mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
+		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
+		.byte 0			/* base 24-31 */
+
+		/* data in real mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
+		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
+		.byte 0			/* base 24-31 */
+
+
+		/* XXX: TSS segment should be defined ; I need to think of memory layout though, base should be the designated mem, limit
+			is sizeof(tss), at least that's what i think.
+		*/
+	end_gdt:
+
 	msg_boot1:	.asciz	">MIOS boot1\r\n"
 	strkernel:	.asciz	"/boot/kernel"
 
@@ -556,7 +616,5 @@ panic16:
 	.endif
 
 	debug_info_halt:	.asciz	"info: system halted for now.\r\n"
-
 	debug_xxx_test:	.asciz	"this is %x, this is %lx\r\n"
-
 	debug_xxx_test2: .asciz	"attemp to jump to kernel\r\n"
