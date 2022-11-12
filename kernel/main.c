@@ -13,8 +13,8 @@
 
 extern uint64_t ticks;
 
-void gboot_main() {
-	printf("welcome to gboot_main\n");
+void kernel_main() {
+	printf("welcome to kernel_main\n");
 
 	show_e820map();
 	init_pm();

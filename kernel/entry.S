@@ -12,6 +12,10 @@ _kernel_entry:
 	movw %ax, %fs
 	movw %ax, %gs
 
+	/* argument passed to entry used to initialize smap entries in mm.c */
+	movl (%esp), %eax
+	movl %eax, (smap)
+
 	// XXX: now needs to be set elsewhere
 	movl $0x7bfc, %esp			/* stack below the bootcode */
 
@@ -27,14 +31,11 @@ _kernel_entry:
 
 	sti 					/* enable interrupts */
 
-	call gboot_main
-	jmp off					/* in case of I return from gboot_main */
+	call kernel_main
+	jmp off					/* in case of I return from kernel_main */
 
 off:
 	cli
 	hlt
 	jmp off
 
-.section .data
-	.global smap
-	smap:   .long   0               // XXX: WIP: just so I can compile it

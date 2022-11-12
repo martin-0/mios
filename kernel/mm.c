@@ -9,8 +9,8 @@
 #include "mm.h"
 #include "libsa.h"
 
-// libsa16
-extern e820_map_t smap;
+/* smap variable gets initialied in entry.S. This entry points to the boot1 smap table */
+e820_map_t* smap;
 
 char* e820_mem_types[5] = {
 		"unknown",
@@ -24,11 +24,13 @@ physical_map_t pm; 						// contains the whole 4GB memory range
 
 void init_pm() {
 	#ifdef DBEUG_PM
-		printf("init_pm: smap: %p, entries: %d\n", &smap, smap.count);
+		printf("init_pm: smap: %p, entries: %d\n", &smap, smap->count);
 	#endif
 
 	uint32_t i,idx,bitpos;
 	uint32_t base,end;
+
+	//smap = (e820_map_t*)*smap_boot1;
 
 	e820_entry_t* cur;
 
@@ -39,11 +41,11 @@ void init_pm() {
 	pm.blocks = 0;
 	pm.pages = 0;
 
-	for (i = 0; i < smap.count; i++) {
-		cur = &smap.map[i];
+	for (i = 0; i < smap->count; i++) {
+		cur = &smap->map[i];
 
 		// available memory only
-		if (smap.map[i].e_type != E820_TYPE_AVAIL) continue;
+		if (smap->map[i].e_type != E820_TYPE_AVAIL) continue;
 
 		// if the size of the available memory is not more than a PAGE_SIZE we can't use it
 		if ( (cur->e_len / PAGE_SIZE) == 0 ) continue;
@@ -142,13 +144,12 @@ void free_page_pm(void* addr) {
 
 void show_e820map() {
 	uint32_t i;
-
 	uint64_t usable = 0;
-	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap.count, smap.entry_size);
 
-	for (i = 0; i < smap.count; i++) {
-		printf("%d: 0x%llx - 0x%llx\t%s\n", i,smap.map[i].e_base, smap.map[i].e_base + smap.map[i].e_len, e820_mem_types[smap.map[i].e_type]);
-		if (smap.map[i].e_type == E820_TYPE_AVAIL) usable += smap.map[i].e_len;
+	printf("memory map address: %p, entries: %d, size: %d\n", &smap, smap->count, smap->entry_size);
+	for (i = 0; i < smap->count; i++) {
+		printf("%d: 0x%llx - 0x%llx\t%s\n", i,smap->map[i].e_base, smap->map[i].e_base + smap->map[i].e_len, e820_mem_types[smap->map[i].e_type]);
+		if (smap->map[i].e_type == E820_TYPE_AVAIL) usable += smap->map[i].e_len;
 	}
 	usable >>= 20;
 	printf("total usable memory: %d MB\n", (uint32_t)usable);
