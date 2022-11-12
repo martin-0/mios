@@ -11,7 +11,7 @@ Right now ELF32 loader statically loads the kernel as it was PoC to see if I can
 ### TODO
 I'm using memcpy_seg to copy program headers to kernel's LINKADDR - 0x20000. Not sure if this is the best idea but I'll stick with it for now. It may not be a bad idea to use multiboot structure to pass arguments to kernel. Right now I'm passing only one argument - smap structure - so I can set the physical memory manager. kernel_entry stub initializes registers, sets the smap pointer and jumps to kernel main. 
 
-##e To run the VM
+### To run the VM
 ```sh
 make disk
 make
