@@ -332,17 +332,14 @@ _start:
 	testw %ax,%ax
 	jnz haltme
 
-	movw $(debug_xxx_test2), %ax
-	call puts16
-
+	/* prepare to jump */
         cli
         lgdt (gdt_desc)
-
         movl %cr0, %eax                         /* enable protected mode */
         orl $1, %eax
         movl %eax, %cr0
 
-	nop
+	pushl $(smap)				/* argument to entry */
         ljmpl $8, $0x20000			/* flush instruction cache and set the proper cs selector */
 
 	cli
@@ -497,6 +494,8 @@ panic16:
                 dap_buf:	.word 0,0	/* adress to read into */
                 dap_start:	.quad 0		/* LBA */
 
+	// XXX: maybe this should be part of the multiboot structure
+	//  XXX: for now we can pass this as an argument to kernel_main
 	/* smap entry is:
 		.quad base, length
 		.long type, xattr (acpi 3)
@@ -507,7 +506,6 @@ panic16:
 		.long 0, 0                              /* entries ; entry size */
 	smap_data:
 		.zero 1536                              /* actual data, 24*64 = 1536 */
-
 
 	// struct boot_partition {
 	//	uint64_t	bp_lba_start;
