@@ -14,6 +14,7 @@ all= tools mios
 mios:	pmbr tools
 	make -C kernel
 	make -C boot
+	make copy
 
 	# install pmbr
 	cd $(OBJDIR) && ./gptfix ../disk00.raw pmbr 
@@ -33,9 +34,14 @@ disk:
 	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:736f696d-0001-0002-0003-feedcafef00d -n 2:4096:266239 -t 2:8300 ./disk00.raw
 	sudo losetup -P /dev/loop0 ./disk00.raw
 	sudo mkfs.ext2 -b $(BLOCKSIZE) /dev/loop0p2
+	sudo losetup -D
+
+copy:
+	@echo "syncing filesystem"
+	sudo losetup -P /dev/loop0 ./disk00.raw
 	sudo mkdir -p $(ROOTFS)
 	sudo mount /dev/loop0p2 $(ROOTFS)
-	sudo mkdir $(ROOTFS)/boot
+	sudo mkdir -p $(ROOTFS)/boot
 	sudo cp obj/kernel  $(ROOTFS)/boot/
 	sudo cp obj/*.o $(ROOTFS)
 	sudo umount $(ROOTFS)
@@ -60,4 +66,5 @@ disk-efi:
 clean:
 	make -C tools clean
 	make -C boot clean
-
+	make -C kernel clean
+	make -C tests clean
