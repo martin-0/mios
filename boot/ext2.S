@@ -32,7 +32,9 @@
 	are free and can be used to move the data around.
 
 
-   XXX: maybe too much 16/32 asm mixing ?
+   XXX: maybe too much 16/32 asm mixing ? We can't address anything above 0xffff without using segment registers.
+	It should be enough, and it is for now, but maybe some sort of checks should be done?
+
    XXX: make all functions description follow the same layout
 
 */
