@@ -17,3 +17,4 @@ make disk
 make
 ./run.sh
 ```
+I've not included build tools though. make will fail if crosscompiling tools are not present on the system.
