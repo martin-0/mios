@@ -1150,36 +1150,65 @@ diskinfo16:
 .endfunc
 
 
-/* void memcpy_seg(int16 dst_seg, int16* dst, void* src, uint16_t bytes)
+/* void farmemcpy(void far* dst, void far* src, uint16_t bytes)
  *
- * operands on stack
+ * NOTE: beware printf16() assumes ds=0 in its current implementation
+ *
+ * Arguments passed on stack:
+ *	<bytes>			2
+ *	<seg|ofst>		4
+ *	<seg|ofst>		4
+ *	<saved ip>		2
 */
-.global memcpy_seg
-.func memcpy_seg
-memcpy_seg:
+.global farmemcpy
+.func farmemcpy
+farmemcpy:
+	pushw %bp
+	movw %sp, %bp
 	pushw %si
 	pushw %di
-	pushw %bx
 	pushw %es
-	movw %sp, %bx				/* to reference arguments */
+	pushw %ds
 
-	movw 10(%bx), %ax
-	movw %ax, %es 
+	/* (%bp) is using ss by defualt */
+	movw  4(%bp), %di
+	movw  6(%bp), %es		/* dst: es:di */
+	movw  8(%bp), %si
+	movw 10(%bp), %ds		/* src: ds:si */
+	movw 12(%bp), %cx		/* size: cx */
 
-	movw 12(%bx), %di			/* es:di dst */
-	movw 14(%bx), %si			/* si: src */
-	movw 16(%bx), %cx			/* bytes */
+	testw %cx,%cx			/* end if nothing to copy */
+	jz .Lfmcpy_end
 
-.Lmemcpy_seg:
+	movw %cx, %dx
+	shr $2, %cx			/* words we can copy */
+	testw %cx,%cx
+	jz .Lfmpcy_prepb
+
+.Lfmcpy_loopw:
+	lodsw
+	stosw
+	loop .Lfmcpy_loopw
+
+.Lfmpcy_prepb:
+	movw %dx, %cx
+	andw $0xf, %cx			/* byte leftovers */
+
+	/* no need to 0-check cx */
+	
+.Lfmcpy_loopb:
 	lodsb
 	stosb
-	loop .Lmemcpy_seg
+	loop .Lfmcpy_loopb
 
+.Lfmcpy_end:
 	xorw %ax,%ax
+	popw %ds
 	popw %es
-	popw %bx
 	popw %di
 	popw %si
+
+	popw %bp
 	ret
 .endfunc
 
