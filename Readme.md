@@ -7,6 +7,9 @@ pmbr searches for MIOS boot partition: 736F696D-0001-0002-0003-FEEDCAFEF00D. Whe
 Kernel is being searched in "/boot/kernel". Symlinks are supported. <br /><br />
 elf32 loader loads the PT_LOAD segments of the kernel.
 
+## TODO
+Change the logic of the jmp, i.e. don't jump in case of an unlikely situation. 
+
 ## NOTES
 Do a cleanup of the gboot code. Lots of 16/32b assembly mixed together.
 
