@@ -20,7 +20,7 @@ char* e820_mem_types[5] = {
 		"ACPI NVS"
 	};
 
-physical_map_t pm; 						// contains the whole 4GB memory range
+physical_map_t pm;						// contains the whole 4GB memory range
 
 void init_pm() {
 	#ifdef DEBUG_PM
