@@ -190,7 +190,7 @@ elf32_load_file:
 	.endif
 
 	/*
-		read is done in 2 stages:
+		laod is done in 2 stages:
 			.Llf_load_blocks			read -12(%ebp) blocks
 			.Llf_load_leftover_block		if P_FILESZ doesn't fit the blocksize completely
 
