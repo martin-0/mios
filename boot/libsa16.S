@@ -1158,7 +1158,6 @@ diskinfo16:
  *	<bytes>			2
  *	<seg|ofst>		4
  *	<seg|ofst>		4
- *	<saved ip>		2
 */
 .global farmemcpy
 .func farmemcpy
@@ -1181,7 +1180,7 @@ farmemcpy:
 	jz .Lfmcpy_end
 
 	movw %cx, %dx
-	shr $2, %cx			/* words we can copy */
+	shr $1, %cx			/* words we can copy */
 	testw %cx,%cx
 	jz .Lfmpcy_prepb
 
@@ -1193,9 +1192,9 @@ farmemcpy:
 .Lfmpcy_prepb:
 	movw %dx, %cx
 	andw $0xf, %cx			/* byte leftovers */
+	test %cx, %cx
+	jz .Lfmcpy_end
 
-	/* no need to 0-check cx */
-	
 .Lfmcpy_loopb:
 	lodsb
 	stosb
