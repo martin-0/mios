@@ -19,6 +19,7 @@
 	/* ext2 specific constants */
         .set INODE_OSFT_TYPEPERM, 0			/* inode offset to type and permissions */
         .set INODE_OFST_ISIZE, 0x4			/* inode offset to i_size */
+	.set INODE_DIRECT_BLOCKS, 12			/* how many direct blocks inode has */
         .set INODE_OFST_DBP_0, 0x28			/* inode offset to direct block pointer 0 */
         .set INODE_OSFT_SIBP, 0x58			/* inode offset to single indirect block pointer */
         .set INODE_OSFT_DIBP, 0x5c			/* inode offset to double indirect block pointer */
