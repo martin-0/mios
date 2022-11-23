@@ -97,13 +97,14 @@ _start:
 	movb $'A',(%si)
 	movb $'B',(%edi)
 
+	xorw %bx,%bx
+	pushw (%bx)
 	pushw (%edi)
 	pushw (%si)
 	pushw $(asd)
 
 	xorw %ax,%ax
 	movw %ax,%ds
-
 	call printf16
 
 	call dump_regs
@@ -113,7 +114,7 @@ _start:
 
 	cli
 	hlt
-	asd: .asciz "ds:si: %x, es:edi: %x\r\n"
+	asd: .asciz "ds:si: %x, es:edi: %x, 0: %x\r\n"
 
 	gphandler:
 		pusha
