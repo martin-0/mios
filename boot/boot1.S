@@ -68,22 +68,36 @@ _start:
 
 	// ______TEST ________________________
 
-1:
-
 	xor %ax,%ax
 	xor %di,%di
 	movw %ax, 0x36(%di)
 	movw $(gphandler), 0x34(%di)
 
+	push %ds
+        cli
+        lgdt (gdt_desc)
+        movl %cr0, %eax
+        orl $1, %eax
+        movl %eax, %cr0
+
+	jmp 0f
+0:
+	movw $0x10, %bx
+	mov %bx, %ds
+	andb $0xfe, %al
+        movl %eax, %cr0
+	popw %ds
+	sti
+
 	movw $0x200, %ax
 	movw %ax, %es
 	movw $0x5000, %si			// ds:si = 0x5000
-	movl $0x1FE000, %edi			// es:edi = 0x200000
-						// wraparound: es:0000 = 0x2000
-	movb $'A', (%si)
-	movb $'B', %es:(%edi)
+	movl $0x200000, %edi			// flat access
 
-	pushw %es:(%edi)
+	movb $'A',(%si)
+	movb $'B',(%edi)
+
+	pushw (%edi)
 	pushw (%si)
 	pushw $(asd)
 
@@ -652,7 +666,6 @@ panic16:
 		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
 		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
 		.byte 0			/* base 24-31 */
-
 
 		/* XXX: TSS segment should be defined ; I need to think of memory layout though, base should be the designated mem, limit
 			is sizeof(tss), at least that's what i think.
