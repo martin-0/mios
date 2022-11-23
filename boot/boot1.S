@@ -1,4 +1,11 @@
 /* martin */
+
+/* NOTE:
+/*	Any address that is used here has to be < 0x10000 as I opted for all segments to be 0.
+	Additional checks should be done. Maybe all these checks can be in linker script.
+	But can linker script check for .bss size too?
+*/
+
 	.set BUFADDR, 0x5000
 	.set PAGE_SIZE, 0x1000
 	.set BUFSZ, 0x1000
@@ -56,7 +63,6 @@ _start:
 	jmp panic16
 
 .Lgetmem:
-
 	/* Get the system memory map from BIOS */
 	// XXX: I should have more ways of detecting memory, starts with E820 and go down
 	//	to older stuff
@@ -617,6 +623,6 @@ panic16:
 		dbgmsg_leftovers_stats:	.asciz	"%d leftovers need %d %d-sectors to read\r\n"
 	.endif
 
-	debug_info_halt:	.asciz	"info: system halted for now.\r\n"
+	debug_info_halt:	.asciz	"boot1: system halted for now.\r\n"
 	debug_xxx_test:	.asciz	"this is %x, this is %lx\r\n"
 	debug_xxx_test2: .asciz	"attemp to jump to kernel\r\n"
