@@ -16,6 +16,8 @@
         .set ADDR_BLOCBUF, 0x4000
         .set ADDR_INODE,0x7100
 
+	.set ADDR_KERNEL_ENTRY, 0x20000
+
 .section .text
 	.code16
 	.global _start
@@ -63,6 +65,42 @@ _start:
 	jmp panic16
 
 .Lgetmem:
+
+	// ______TEST ________________________
+
+1:
+	call dump_regs
+
+	movw $0x2000, %ax
+	movw %ax, %es
+
+	movw $0x5000, %si			// ds:si = 0x5000
+	movl $0x1E0000, %edi			// es:edi = 0x200000
+
+	movb $'A', (%si)
+	movb $'B', %es:(%edi)
+
+	pushw %es:(%edi)
+	pushw (%si)
+	pushw $(asd)
+
+	xorw %ax,%ax
+	movw %ax,%ds
+
+	call printf16
+
+	call dump_regs
+	xorw %ax,%ax
+	int $0x16
+	jmp 1b
+
+	cli
+	hlt
+	asd: .asciz "ds:si: %x, es:edi: %x\r\n"
+	// _____END of TEST _________________________
+
+
+
 	/* Get the system memory map from BIOS */
 	// XXX: I should have more ways of detecting memory, starts with E820 and go down
 	//	to older stuff
@@ -346,7 +384,7 @@ _start:
         movl %eax, %cr0
 
 	pushl $(smap)				/* argument to entry */
-        ljmpl $8, $0x20000			/* flush instruction cache and set the proper cs selector */
+        ljmpl $8, $ADDR_KERNEL_ENTRY		/* flush instruction cache and set the proper cs selector */
 
 	cli
 	hlt
