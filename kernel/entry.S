@@ -1,5 +1,7 @@
 /* martin */
 
+	.set ADDR_STACKSTART,	0x1ff00
+
 .section .text
 	.code32
 
@@ -16,8 +18,7 @@ _kernel_entry:
 	movl (%esp), %eax
 	movl %eax, (smap)
 
-	// XXX: now needs to be set elsewhere
-	movl $0x7bfc, %esp			/* stack below the bootcode */
+	movl $ADDR_STACKSTART, %esp
 
 	call clrscr
 
