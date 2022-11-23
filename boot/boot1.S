@@ -69,9 +69,14 @@ _start:
 	// ______TEST ________________________
 
 1:
-	call dump_regs
-	
-	.byte 0xff
+
+	xor %ax,%ax
+	xor %di,%di
+	movw %ax, 0x36(%di)
+	movw $(gphandler), 0x34(%di)
+
+	//movw $40, %dx
+	//call dump_mem16
 
 	movw $0x200, %ax
 	movw %ax, %es
@@ -79,7 +84,6 @@ _start:
 	movw $0x5000, %si			// ds:si = 0x5000
 	movl $0x1FE000, %edi			// es:edi = 0x200000
 						// wraparound: es:0000 = 0x2000
-
 	movb $'A', (%si)
 	movb $'B', %es:(%edi)
 
@@ -100,6 +104,32 @@ _start:
 	cli
 	hlt
 	asd: .asciz "ds:si: %x, es:edi: %x\r\n"
+
+	gphandler:
+		pusha
+		xorw %bx,%bx
+		movw %bx, %ds
+		movw $(gpinfo), %si
+
+		1:
+		lodsb
+		testb %al, %al
+		je 2f
+
+		mov $0x0e, %ah
+		int $0x10
+		jmp 1b
+		2:
+
+		// %ds is set to 0
+		call dump_regs
+
+		cli
+		hlt
+		iret
+		gpinfo:	.asciz	"GP handler called!\r\n"
+
+
 	// _____END of TEST _________________________
 
 
