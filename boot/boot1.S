@@ -71,11 +71,12 @@ _start:
 1:
 	call dump_regs
 
-	movw $0x2000, %ax
+	movw $0x200, %ax
 	movw %ax, %es
 
 	movw $0x5000, %si			// ds:si = 0x5000
-	movl $0x1E0000, %edi			// es:edi = 0x200000
+	movl $0x1FE000, %edi			// es:edi = 0x200000
+						// wraparound: es:0000 = 0x2000
 
 	movb $'A', (%si)
 	movb $'B', %es:(%edi)
