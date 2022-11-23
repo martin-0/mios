@@ -1,5 +1,5 @@
 /* martin */
-	.set ELFSIG, 	0x464c457f			/* 0x7F "ELF" */
+	.set ELFSIG, 	0x464c457f				/* 0x7F "ELF" */
 
 	.set EI_CLASS,		0x4
 	.set EI_MACHINE,	0x12
@@ -48,8 +48,8 @@ elf32_load_file:
 	subl $32, %esp
 
 	/* variables on stack:
-		-4(%ebp)	P_OFFSET: block index within inode's blocks
-		-8(%ebp)	P_OFFSET: offset within block itself; NOTE: unused but kept for now
+		-4(%ebp)	NOTE: unused, was P_OFFSET: block index within inode's blocks
+		-8(%ebp)	NOTE: unused, was P_OFFSET: offset within block itself
 		-12(%ebp)	P_FILESZ: blocks to read
 		-16(%ebp)	P_FILESZ: size leftover, requires additional block to read
 		-20(%ebp)	current paddr
@@ -148,13 +148,12 @@ elf32_load_file:
 					can be probably ignored during loading
 	*/
 
-	/* P_OFFSET: calculate block index within inode's blocks and its offset within buffer */
-	xorl %edx,%edx
+	/* XXX: probably avoid using div but rather mask and check */
+
+	xorl %edx,%edx						/* P_OFFSET: calculate block index within inode's blocks and its offset within buffer */
 	movl P_OFFSET(%edi), %eax
 	movl (l_ext2_sb_blocksize), %ecx
 	div %ecx
-	movl %eax, -4(%ebp)					/* P_OFFSET: block index within inode's blocks */
-	movl %edx, -8(%ebp)					/* NOTE: unused: P_OFFSET: offset within block itself */
 
 	/* Linker script aligned all segments to page size which implies block size. Reject loading unaligned segments. */
 	testl %edx, %edx
@@ -171,11 +170,9 @@ elf32_load_file:
 	.ifdef DEBUG_VERBOSE
 		pushl -16(%ebp)
 		pushl -12(%ebp)
-		pushl -8(%ebp)
-		pushl -4(%ebp)
 		pushw $(elf32_lf_dbg2)
 		call printf16
-		addw $18, %sp
+		addw $10, %sp
 	.endif
 
 	/* P_PADDR: page aligned, below 1MB: linear_addr >> 4 gives us required segment */
@@ -459,6 +456,6 @@ elf32_check_header:
 		elf32_ch_info:	.asciz	"program header entries: %d, starting at 0x%x, entry: 0x%x\r\n"
 		elf32_lf_info:	.asciz	"elf32_load_file: file size: 0x%lx bytes, spread on %d %d-byte blocks\r\n"
 		elf32_lf_dbg1:	.asciz	"phdr: type: 0x%lx, offset: 0x%lx, paddr: 0x%lx, filesize: 0x%lx\r\n"
-		elf32_lf_dbg2:	.asciz	"P_OFFSET: 0x%lx/0x%lx (block pos/block offset)\r\nP_FILESZ: 0x%lx/0x%lx (blocks/leftovers)\r\n"
+		elf32_lf_dbg2:	.asciz	"P_FILESZ: 0x%lx/0x%lx (blocks/leftovers)\r\n"
 		elf32_lf_dbg3:	.asciz	"dst segment: 0x%x\r\n"
 	.endif
