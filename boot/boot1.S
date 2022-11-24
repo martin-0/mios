@@ -92,8 +92,6 @@ _start:
 		addw $14, %sp
 	.endif
 
-.Lread_gpthdr:
-
 	/* read the GPT header */
 	xorl %ebx, %ebx
 	movl %ebx, (q_dap_start+4)			/* set upper 32b to 0 in start LBA */
