@@ -8,7 +8,8 @@ Kernel is being searched in "/boot/kernel". Symlinks are supported. <br /><br />
 elf32 loader loads the PT_LOAD segments of the kernel.
 
 ## TODO
-Change the logic of the jmp, i.e. don't jump in case of an unlikely situation. 
+***WIP Change the logic of the jmp, i.e. don't jump in case of an unlikely situation. 
+finally after these months I can work on kernel again .. don't recall what I did - idt.S requires some rethinking and fixing
 
 ## NOTES
 Do a cleanup of the gboot code. Lots of 16/32b assembly mixed together.
