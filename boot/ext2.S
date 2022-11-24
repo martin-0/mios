@@ -109,54 +109,30 @@ ext2_initmod:
 	/* partition's LBA has to be in 32B limit as stated in notes above */
 	movl (q_part_lba_end+4), %eax
 	test %eax, %eax
-	jz .Lprepdap
-
-	movw $(ext2_init_part_toobig), %ax
-	call puts16
-	.ifdef EXT2_DEBUG_VERBOSE
-		pushw (w_bp_disk)
-		pushl (q_part_lba_end)
-		pushl (q_part_lba_end+4)
-		pushl (q_part_lba_start)
-		pushl (q_part_lba_start+4)
-		pushw $(ext2_dbg_bootpartition_llx)
-		call printf16
-		addw $20, %sp
-	.endif
-
-	movw $ETOOBIG, %ax
-	jmp .Linitm_end
-
-.Lprepdap:
-	/* we can't use access_block yet, we need superblock first */
-	movl $ADDR_READBUF, %ecx
-	movl $SECTORS_IN_BUF, %edx
-	movl (q_part_lba_start), %eax			/* set start LBA of partition */
+	jnz .Lim_err_parttoobig
 
 	.ifdef EXT2_DEBUG_VERBOSE
 		call dbg_ext2_show_partition
 	.endif
-	call ext2_readdisk
 
+	/* we can't use access_block yet, we need superblock first */
+	movl $ADDR_READBUF, %ecx
+	movl $SECTORS_IN_BUF, %edx
+	movl (q_part_lba_start), %eax			/* set start LBA of partition */
+	call ext2_readdisk
 	test %ax,%ax					/* ax is set to 1 along with errno16 in case of an error */
-	jnz .Linitm_end
+	jnz .Lim_end
 
 	/* check the ext2 signature first */
 	movl $ADDR_READBUF, %esi
 	addl $EXT2_OFST_SUPERBLOCK, %esi		/* offset to superblock */
 	cmpw $EXT2_MAGIC, EXT2_SB_OFST_MAGIC(%si)
-	je .Lmagic_ok
-	
-	movw $(ext2_init_nomagic), %ax			/* partition doesn't have magic word, rejecting to continue */
-	call puts16
-	movw $ENOMAGIC, %ax				/* set error code */
-	jmp .Linitm_end
+	jne .Lim_err_magic
 
-.Lmagic_ok:
 	/* check the ext2 fs state */
 	movl EXT2_SB_OFST_STATE(%esi), %eax		/* loads 2B s_state and 2B s_error at the same time */
 	cmpw $1, %ax					/* 1: VALID_FS, 2: ERROR_DETECTED */
-	je .Lbsize					/* OK to proceed with valid FS */
+	je 1f						/* OK to proceed with valid FS */
 
 	pushl %eax					/* inform about the unclean FS */
 	movl $(ext2_init_fs_state_unclean), %eax
@@ -165,37 +141,21 @@ ext2_initmod:
 
 	shrl $16, %eax					/* shift error value to ax */
 	cmpw $3, %ax					/* 3 = panic on error, refuse to continue */
-	jne .Lstate_ok_enough				/* ok enough to continue reading the FS */
+	je .Lim_err_panicfs					/* ok enough to continue reading the FS */
 
-	movw $EFSPANIC, %ax				/* exit with error */
-	jmp .Linitm_end
-
-.Lstate_ok_enough:
 	.ifdef EXT2_DEBUG_VERBOSE
 		pushw %ax
 		pushw $(ext2_init_fs_state_okenough)
 		call printf16
 		addw $4, %sp
 	.endif	
-.Lbsize:
+1:
 	movl $EXT2_SIZE_LOG_UNIT, %eax			/* blocksize = 1024 << s_log_block_size */
 	movl EXT2_SB_OSFT_LOGBS(%si), %ecx		/* s_log_block_size */
 	shll %ecx, %eax	
-
 	cmpw $PAGE_SIZE, %ax				/* blocksize has to be <= PAGE_SIZE */
-	jbe .Lbs_ok
+	ja .Lim_err_unsupp_blocksize
 
-	.ifdef EXT2_DEBUG_VERBOSE
-		pushw %ax
-		pushw $(ext2_init_bsize_unsupported)
-		call printf16
-		addw $4, %sp
-	.endif
-
-	movw $EBSUNSUPP, %ax
-	jmp .Linitm_end
-
-.Lbs_ok:
 	movl %eax, (l_ext2_sb_blocksize)		/* save the block size */
 	shrl $2, %eax					/* how many sizeof(int32_t) entries can fit block size */
 	movw %ax, (w_ext2_inode_indirect_ref)
@@ -205,67 +165,46 @@ ext2_initmod:
 	/* unlikely but check */
 	movl EXT2_SB_OFST_ALLBLOCKS(%si), %eax		/* l_ext2_sb_blocks_count */
 	testl %eax, %eax
-	jnz .Lcheck_tb
-	movw $ENOBLOCKS, %ax				/* it's expected to have some blocks on FS */
-	jmp .Linitm_end	
-
-.Lcheck_tb:
+	jz .Lim_err_noblocks
 	movl %eax, (l_ext2_sb_blocks_count)		/* save it */
 
-	/* XXX: check the version and verify if I can use it as read-only */
-
-.Lnodesz:
+	// TODO: check ext2 revision if I'm able to read it
 	movl EXT2_SB_OSFT_REV_LEVEL(%si), %eax		/* check the revision version, i.e. major version */
 	movl %eax, (l_ext2_sb_rev_level)
 	testl %eax, %eax				/* handle version-dependent variables */
-	jz .Lvers0
+	jz .Lim_rev0
 
-	movw EXT2_SB_OFST_INODE_SZ(%si), %ax		/* inode size can't be bigger than block size */
-	cmpw %ax, (l_ext2_sb_blocksize)
-	jge .Linodesz.1
-
-.Lbadinodesz:
-	movw $EINODESZ, %ax
-	jmp .Linitm_end
-
-.Linodesz.1:
-	testw %ax, %ax					/* return error if inode is 0 size */
-	jz .Lbadinodesz
+	/* check reported inode size in superblock */
+	movw EXT2_SB_OFST_INODE_SZ(%si), %ax		/* inode size */
+	testw %ax, %ax					/* can't be 0 */
+	jz .Lim_err_inode_size
+	cmpw (l_ext2_sb_blocksize), %ax			/* can't be bigger than block size */
+	ja .Lim_err_inode_size
 	movw %ax, (w_ext2_sb_inode_size)		/* inode size ok, save it */
-	jmp .Lsb_cont
+	jmp 2f
 
-.Lvers0:
+.Lim_rev0:
 	/* default inode size */
 	movw $EXT2_DEFAULT_INODE_SIZE, (w_ext2_sb_inode_size)
 
-.Lsb_cont:
+2:
 	/* compute inodes_per_block */
 	movl (l_ext2_sb_blocksize), %eax		/* inodes_per_block = l_ext2_sb_blocksize/w_ext2_sb_inode_size */
 	movzxw (w_ext2_sb_inode_size), %ecx
 	xorl %edx,%edx
 	div %ecx
 	test %edx, %edx					/* we should not have any leftover by this division */
-	jz .Lipb_ok
-	movw $EBLKINODE, %ax
-	jmp .Linitm_end
+	jnz .Lim_err_inode_block_alignment
 
-.Lipb_ok:
 	movl %eax, (l_ext2_inode_entries_per_block)
 	movl EXT2_SB_OFST_BLOCK_PG(%si), %eax		/* l_ext2_sb_blocks_per_group */
 	testl %eax, %eax				/* can't be 0 */
-	jnz .Lbpg_ok
-	movw $ENOBLCPG, %ax
-	jmp .Linitm_end
-
-.Lbpg_ok:
+	jz .Lim_err_blocks_pg
 	movl %eax, (l_ext2_sb_blocks_per_group)		/* save l_ext2_sb_blocks_per_group */
+
 	movl EXT2_SB_OFST_INODES_PG(%si), %eax
 	test %eax, %eax					/* can't be 0 */
-	jnz .Lipg_ok
-	movw $ENOINOPG, %ax
-	jmp .Linitm_end
-
-.Lipg_ok:
+	jz .Lim_err_inodes_pg
 	movl %eax, (l_ext2_sb_inodes_per_group)		/* save inodes per group */
 
 	/* figure out the 2^n exponent of the inode size; used in acces_inode() */
@@ -275,26 +214,20 @@ ext2_initmod:
 
 	/* NOTE:
 		Superblock starts 1024b from the partition start and is 1kB big.
-		Depending on the block size following is in the buffer cache:
+		Depending on the block size following can happen:
 
 			1k block: [block 0][superblock][bgdt][block3][block4]	; block 0 was skipped by EXT2_OFST_SUPERBLOCK (1024, ie block size)
 			2k block: [padding 0x400|superblock][bgdt]		; block 1 is block group descriptor table
-			4k block: [padding 0x400|superblock|padding]		; gbdt is not in cache
+			4k block: [padding 0x400|superblock|padding][bgdt]
 	*/
-
+	movw $2, %dx
+	movw $1, %cx
 	cmpl $1024, (l_ext2_sb_blocksize)
-	jne .Lbsnot1k
+	cmove %dx, %cx
 
-	movl $2, (l_ext2_bgdt_bstart)			/* block group descriptor table starts at block id 2 */
-	jmp .Lgbdt_lba
-
-.Lbsnot1k:
-	movl $1, (l_ext2_bgdt_bstart)			/* block group descriptor table starts at block id 1 */
-
-.global .Lgbdt_lba
-.Lgbdt_lba:
+	movzxw %cx, %ecx
+	movl %ecx, (l_ext2_bgdt_bstart)			/* save block group descriptor table position */
 	movzxw (w_ext2_blocksize_in_sectors), %eax	/* blocksize_in_sectors * bgdt_start = LBA of the bgdt start from partition start */
-	movl (l_ext2_bgdt_bstart), %ecx
 	xorl %edx, %edx
 	mull %ecx
 
@@ -302,7 +235,66 @@ ext2_initmod:
 	movl %eax, (l_ext2_bgdt_lba_start)
 
 	xorl %eax, %eax
-.Linitm_end:
+	jmp .Lim_end
+
+	/* superblock reports 0 inodes per group */
+.Lim_err_inodes_pg:
+	movw $ENOINOPG, %ax
+	jmp .Lim_end
+
+	/* superblock reports 0 blocks per group */
+.Lim_err_blocks_pg:
+	movw $ENOBLCPG, %ax
+	jmp .Lim_end
+
+	/* blocksize has to be aligned to inode size */
+.Lim_err_inode_block_alignment:
+	movw $EBLKINODE, %ax
+	jmp .Lim_end
+
+	/* wrong inode size in superblock */
+.Lim_err_inode_size:
+	movw $EINODESZ, %ax
+	jmp .Lim_end
+
+	/* superblock says no blocks on FS */
+.Lim_err_noblocks:
+        movw $ENOBLOCKS, %ax
+        jmp .Lim_end
+
+	/* unsupported block size */
+.Lim_err_unsupp_blocksize:
+	pushw %ax
+	pushw $(ext2_init_bsize_unsupported)
+	call printf16
+	addw $4, %sp
+	movw $EBSUNSUPP, %ax
+	jmp .Lim_end
+
+	/* FS in unstable state */
+.Lim_err_panicfs:
+	movw $EFSPANIC, %ax
+	jmp .Lim_end
+
+	/* ext2 magic not found */
+.Lim_err_magic:
+	movw $(ext2_init_nomagic), %ax			/* partition doesn't have magic word, rejecting to continue */
+	call puts16
+	movw $ENOMAGIC, %ax				/* set error code */
+	jmp .Lim_end
+
+	/* ext2 partition beyond 32b limit */
+.Lim_err_parttoobig:
+	movw $(ext2_init_part_toobig), %ax
+	call puts16
+
+	.ifdef EXT2_DEBUG_VERBOSE
+		call dbg_ext2_show_partition
+	.endif
+
+	movw $ETOOBIG, %ax
+	/* fall through to end */
+.Lim_end:
 	popl %edi
 	popl %esi	
 	ret
@@ -311,8 +303,7 @@ ext2_initmod:
 /* struct inode*  ext2_search_file(char* filepath)
  *
  * search for the file in the filepath. filepath has to be an absolute path. if found return the struct inode pointer.
- *
- * returns: ptr to inode if OK, NULL otherwise
+ * return: ptr to inode if OK, NULL otherwise
 */
 .global ext2_search_file
 .func ext2_search_file
@@ -325,7 +316,7 @@ ext2_search_file:
 	movl %esi, %eax						/* PATH_MAX check */
 	call strlen32
 	cmpl $PATH_MAX, %eax
-	jae .Lsf_err
+	jae .Lsf_err_path_toolong
 
 	/* copy the string to pathbuf where it will be worked on */
 	movl %esi, %edx
@@ -337,7 +328,7 @@ ext2_search_file:
 
 .Lsf_mainloop:
 	test %edi, %edi
-	jz .Lsf_postloop					/* we are done parsing the path */
+	jz .Lsf_filefound					/* we are done parsing the path */
 
 	/* check if it's absolute path */
 	movb (%edi), %al
@@ -350,16 +341,16 @@ ext2_search_file:
 	movl $ADDR_DIRNODE, %edx
 	movl $2, %eax
 	call ext2_access_inode					/* 0 on success */
-	jc .Lsf_rootofailed					/* handle access error */
-	testl %eax, %eax					/* while redundant check I don't mind */
-	jnz .Lsf_rootofailed
+	jc .Lsf_err_rootofailed					/* handle access error */
+	testl %eax, %eax					/* redundant check */
+	jnz .Lsf_err_rootofailed
 
 	/* root node has to be directory */
 	movl $ADDR_DIRNODE, %ebx				/* ebx: dirnode */
 	movw INODE_OSFT_TYPEPERM(%ebx), %ax
 	andw $S_IFMT, %ax
 	cmpw $S_IFDIR, %ax
-	jne .Lsf_rootnotdir
+	jne .Lsf_err_rootnotdir
 
 	movl $(l_addr_token), %ecx				/* strtok_r(pathbuf, "/", &token) */
 	movl $(ext2_path_delim), %edx
@@ -407,18 +398,10 @@ ext2_search_file:
 	cmpw $S_IFDIR, %ax					/* is it directory? */
 	jne .Lsf_isit_file
 
-	/* current node is directory */
+	/* current node is directory, can't be the end of the path */
 	test %edi, %edi
-	jnz .Lsf_update_dirnode
+	jz .Lsf_err_inodeisdir
 
-	/* handle error */
-	pushw %cx						/* ecx still holds the pointer to previous token */
-	pushw $(ext2_search_file_path_isdir)
-	call printf16
-	addw $4, %sp
-	jmp .Lsf_err_end
-
-.Lsf_update_dirnode:
 	/* inode we are working with now will become dirnode */
 	movw (w_ext2_sb_inode_size), %cx
 	movw $(ADDR_INODE), %dx
@@ -429,19 +412,16 @@ ext2_search_file:
 .Lsf_isit_file:
 	cmpw $S_IFREG, %ax					/* is it regular file? */
 	jne .Lsf_isit_symlink
-	test %edi,%edi						/* we got what we were looking for */
-	jz .Lsf_postloop
 
-	/* handle error */
-	pushw %cx						/* ecx still holds the pointer to previous token */
-	pushw $(ext2_search_file_path_notdir)
-	call printf16
-	addw $4, %sp
-	jmp .Lsf_err_end
+	test %edi,%edi						/* ok only if we have nothing else to process */
+	jnz .Lsf_err_inodenotdir
+
+	/* we found what we were looking for */
+	jmp .Lsf_filefound
 
 .Lsf_isit_symlink:
 	cmpw $S_IFLNK, %ax
-	jne .Lsf_unknown_type
+	jne .Lsf_err_unknown_type
 
 	movl %edi, %edx						/* token */
 	movl $ADDR_INODE, %eax					/* inode */
@@ -465,50 +445,57 @@ ext2_search_file:
 	movl %eax, %edi						/* now points to next token */
 	jmp .Lsf_mainloop.1
 
-	/* unknown inode type, abort the search */
-.Lsf_unknown_type:
+.Lsf_filefound:
+	/* all OK, return */
+	movl %ebx, %eax
+	jmp .Lsf_end
+
+	/* unknown inode type */
+.Lsf_err_unknown_type:
 	pushw %ax
 	pushw $(ext2_search_file_unk_inodetype)
 	call printf16
 	addw $4, %sp
 	jmp .Lsf_err_end
 
-.Lsf_postloop:
-	// XXX: just some tests for now ..
-	/* we found what we were looking for, ADDR_INODE has inode structure filled in */
-	xorl %edx, %edx
-	movl 4(%ebx), %eax		// size in bytes
-	movl (l_ext2_sb_blocksize), %ecx
-	div %ecx
-	test %edx, %edx
-	jz .Lsf_post1
-	inc %eax
+	/* inode is file and we still have something to process in path */
+.Lsf_err_inodenotdir:
+	pushw %cx						/* ecx still holds the pointer to previous token */
+	pushw $(ext2_search_file_path_notdir)
+	call printf16
+	addw $4, %sp
+	jmp .Lsf_err_end
 
-.Lsf_post1:
-	/* all OK, return */
-	movl %ebx, %eax
-	jmp .Lsf_end
+	/* inode is directory at the end of the path */
+.Lsf_err_inodeisdir:
+	pushw %cx						/* ecx still holds the pointer to previous token */
+	pushw $(ext2_search_file_path_isdir)
+	call printf16
+	addw $4, %sp
+	jmp .Lsf_err_end
 
-	/* handle errors */
-.Lsf_rootnotdir:
+	/* root node not a dir */
+.Lsf_err_rootnotdir:
 	movw $ext2_search_file_rootnotdir, %ax
 	call puts16
 	jmp .Lsf_err_end
 
-.Lsf_rootofailed:
+.Lsf_err_rootofailed:
 	movw $(ext2_search_file_rootofailed), %ax
 	call puts16
 	jmp .Lsf_err_end
 
+	/* print generic error and exit */
 .Lsf_err_generic:
 	movl $(ext2_search_file_genericerr), %eax
 	call puts16
 	jmp .Lsf_err_end
 
-.Lsf_err:
+	/* PATH is bigger than MAX_PATH */
+.Lsf_err_path_toolong:
 	movw $ext2_search_file_path_toolong, %ax
 	call puts16
-
+	/* fall through to err_end */
 .Lsf_err_end:
 	xorl %eax,%eax
 
@@ -1676,10 +1663,12 @@ dbg_ext2_show_dap:
 dbg_ext2_show_partition:
 	pushw (w_bp_disk)
 	pushl (q_part_lba_end)
+	pushl (q_part_lba_end+4)
 	pushl (q_part_lba_start)
+	pushl (q_part_lba_start+4)
 	pushw $(ext2_dbg_bootpartition)
 	call printf16
-	addw $12, %sp
+	addw $20, %sp
 	ret
 .endfunc
 
@@ -1771,9 +1760,9 @@ dbg_ext2_show_gbdt:
 	ext2_init_part_toobig:		.asciz	"ext2: partition spreads beyond 32b lba, unsupported by this driver.\r\n"
 	ext2_init_nomagic:		.asciz	"ext2: no magic signature found.\r\n"
 	ext2_init_fs_state_unclean:	.asciz	"ext2: warning: filesystem was not unmounted properly.\r\n" 
+	ext2_init_bsize_unsupported:	.asciz	"ext2: unsupported block size: %d\r\n"
 
 	.ifdef EXT2_DEBUG_VERBOSE
-		ext2_init_bsize_unsupported:	.asciz	"ext2: unsupported block size: %d\r\n"
 		ext2_init_fs_state_okenough:	.asciz	"ext2: ok to proceed anyway, error handling code: %d\r\n"
 	.endif
 
@@ -1854,8 +1843,7 @@ dbg_ext2_show_gbdt:
 	/* debug strings */
 	ext2_dbg_msg_start:		.asciz	"\r\n-- ext2 dump of variables --\r\n"
 	ext2_dbg_dap:			.asciz	"dap packet: size: %d, sectors: %d, buf: %x:%x, lba: 0x%lx%lx\r\n"
-	ext2_dbg_bootpartition:		.asciz	"partition: 0x%lx - 0x%lx, disk: 0x%x\r\n"
-	ext2_dbg_bootpartition_llx:	.asciz	"partition: 0x%lx%lx - 0x%lx%lx, disk: 0x%x\r\n"
+	ext2_dbg_bootpartition:		.asciz	"partition: 0x%lx%lx - 0x%lx%lx, disk: 0x%x\r\n"
 	ext2_dbg_superblock:		.ascii	"superblock:\r\n"
 					.ascii	"  blocksize:\t\t0x%lx\r\n"
 					.ascii	"  bsize in sectors: %d\r\n"
