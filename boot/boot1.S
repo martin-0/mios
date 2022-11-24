@@ -6,17 +6,7 @@
 	But can linker script check for .bss size too?
 */
 
-	.set BUFADDR, 0x5000
-	.set PAGE_SIZE, 0x1000
-	.set BUFSZ, 0x1000
-	.set STACK_OFFST, 0x1ffc
-
-
-        // XXX: should be .included from common file or exported as global in ext2
-        .set ADDR_BLOCBUF, 0x4000
-        .set ADDR_INODE,0x7100
-
-	.set ADDR_KERNEL_ENTRY, 0x20000
+.include "gboot.inc"
 
 .section .text
 	.code16
@@ -35,7 +25,7 @@ _start:
 
 	.asciz "MIOS"
 
-	.= _start + 0x3e			/* offset to bootcode after BPB */
+	.= _start + 0x3e				/* offset to bootcode after BPB */
 1:
 	/* setup the segment registers */
 	xorw %ax, %ax
@@ -43,10 +33,10 @@ _start:
 	movw %ax, %es
 	movw %ax, %fs
 	movw %ax, %gs
-	movw %ax, %ss				/* while stack was set in pmbr it's better to do it just in case */
-	movw $STACK_OFFST, %sp
+	movw %ax, %ss
+	movw $BOOT1_STACK_SP, %sp
 
-	movw %dx, (bp_bootdrive)		/* save bootdrive */
+	movw %dx, (w_bp_bootdrive)			/* save bootdrive */
 	movw $(msg_boot1), %ax
 	call puts16
 
@@ -58,151 +48,45 @@ _start:
 	/* Attempt to enable the A20 gate */
 	call enable_A20
 	test %ax, %ax
-	jz .Lgetmem
-
-	pushw $(fatal_a20)			/* fatal error if we can't have A20 */
-	call printf16
-	jmp panic16
-
-.Lgetmem:
-
-	// ______TEST ________________________
-
-	xor %ax,%ax
-	xor %di,%di
-	movw %ax, 0x36(%di)
-	movw $(gphandler), 0x34(%di)
-
-	push %ds
-        cli
-        lgdt (gdt_desc)
-        movl %cr0, %eax
-        orl $1, %eax
-        movl %eax, %cr0
-
-	jmp 0f
-0:
-	movw $0x10, %bx
-	mov %bx, %ds
-	andb $0xfe, %al
-        movl %eax, %cr0
-	popw %ds
-	sti
-
-	movw $0x200, %ax
-	movw %ax, %es
-	movw $0x5000, %si			// ds:si = 0x5000
-	movl $0x200000, %edi			// flat access
-
-	movb $'A',(%si)
-	movb $'B',(%edi)
-
-	xorw %bx,%bx
-	pushw (%bx)
-	pushw (%edi)
-	pushw (%si)
-	pushw $(asd)
-
-	xorw %ax,%ax
-	movw %ax,%ds
-	call printf16
-
-	call dump_regs
-	xorw %ax,%ax
-	int $0x16
-	jmp 1b
-
-	cli
-	hlt
-	asd: .asciz "ds:si: %x, es:edi: %x, 0: %x\r\n"
-
-	gphandler:
-		pusha
-		xorw %bx,%bx
-		movw %bx, %ds
-		movw $(gpinfo), %si
-
-		1:
-		lodsb
-		testb %al, %al
-		je 2f
-
-		mov $0x0e, %ah
-		int $0x10
-		jmp 1b
-		2:
-
-		// %ds is set to 0
-		call dump_regs
-		movw %sp, %ax
-		movw $40, %dx
-		call dump_mem16
-
-		cli
-		hlt
-		iret
-		gpinfo:	.asciz	"GP handler called!\r\n"
-
-
-	// _____END of TEST _________________________
-
-
+	jnz .Lb1_err_a20				/* fatal error if we can't activate A20 */
 
 	/* Get the system memory map from BIOS */
-	// XXX: I should have more ways of detecting memory, starts with E820 and go down
-	//	to older stuff
+	// TODO: fallback methods of detecting memory
 
-	movw $(smap), %ax			/* detect memory with E820 */
+	movw $(smap), %ax				/* detect memory with E820 */
 	call getmem_E820
 	test %ax, %ax
-	jz .Ldiskinfo
+	jnz .Lb1_err_e820
 
-	movw $(msg_mem_err), %ax
-	call puts16
-	jmp panic16
-
-.Ldiskinfo:
 	movw $1, %cx
-	movw (bp_bootdrive), %dx
-	movw $BUFADDR, %ax
-	call diskinfo16				/* diskinfo16(char* buf, int16_t disk, char eddver) */
+	movw (w_bp_bootdrive), %dx
+	movw $ADDR_SIBPBUF, %ax
+	call diskinfo16					/* diskinfo16(char* buf, int16_t disk, char eddver) */
 	test %ax,%ax
-	jnz .Ldiskinfok
+	jz .Lb1_err_errno_panic
 
-	call print_err				/* print the error and panic */
-	jmp panic16
-
-.Ldiskinfok:
-	/* From what I've read it seems the 512 sector size is really a standard in BIOS services. Sector sizes such as 520
-	 * are problem for BIOS itself, at least so I was told.
-	 *
-	 * For now I'm assuming 512 sector size.
-	 */
+	/* From what I've read it seems the 512 sector size is really a standard in BIOS services.
+	 * Sector sizes such as 520 are problem for BIOS itself. 
+	 * Assuming 512 sector size.
+	*/
 	movw %ax, %si
 	movw 0x18(%si), %ax
 
-	cmpw $0x200, %ax			/* sector size: 512 */
-	je .Lsecsizeok
+	cmpw $0x200, %ax				/* sector size: 512 */
+	jne .Lb1_err_unsupp_sectorsz
 
-	pushw %ax				/* unsupported sector size */
-	pushw $(fatal_secsize)
-	call printf16
-	jmp panic16
-
-.Lsecsizeok:
-	movw %ax, (bp_sector_size)
-	movw $8, (sectors_in_buf)		/* how many sectors can we load buffer with */
-
-	movl 0x10(%si), %eax			/* total disk LBAs */
-	movl %eax, (bp_sectors)
+	movw %ax, (w_bp_sector_size)
+	movw $8, (w_sectors_in_buf)			/* how many sectors can we load buffer with */
+	movl 0x10(%si), %eax				/* total disk LBAs */
+	movl %eax, (q_bp_sectors)
 	movl 0x14(%si), %eax
-	movl %eax, (bp_sectors+4)
+	movl %eax, (q_bp_sectors+4)
 
 	.ifdef DEBUG_VERBOSE
-		pushl (bp_sectors)
-		pushl (bp_sectors+4)
-		pushw (bp_sector_size)
-		pushw (bp_bootdrive)
+		pushl (q_bp_sectors)
+		pushl (q_bp_sectors+4)
+		pushw (w_bp_sector_size)
+		pushw (w_bp_bootdrive)
 		pushw $(dbgmsg_diskinfo)
 		call printf16
 		addw $14, %sp
@@ -212,106 +96,96 @@ _start:
 
 	/* read the GPT header */
 	xorl %ebx, %ebx
-	movl %ebx, (dap_start+4)		/* set upper 32b to 0 in start LBA */
+	movl %ebx, (q_dap_start+4)			/* set upper 32b to 0 in start LBA */
 	inc %bx
-	movl %ebx, (dap_start)			/* set lower 32b to 1 */
-	movw %bx, (dap_sectors)			/* reading one LBA */
-	movw $BUFADDR,(dap_buf)			/* into BUFADDR */
-	call do_read				/* do_read() */
+	movl %ebx, (q_dap_start)			/* set lower 32b to 1 */
+	movw %bx, (w_dap_sectors)			/* reading one LBA */
+	movw $ADDR_SIBPBUF,(w_dap_buf)			/* into ADDR_SIBPBUF */
+	call do_read
 
         /* verify GPT signature */
+	// NOTE: attempt to read a backup one in case of failure?
 	movw $8, %cx
 	movw $(gpt_hdr_signature), %dx
-	movw $BUFADDR, %ax
-	call memcmp16				/* memcmp16(BUFADDR, gpt_hdr_signature, 8) */
-
+	movw $ADDR_SIBPBUF, %ax
+	call memcmp16					/* memcmp16(ADDR_SIBPBUF, gpt_hdr_signature, 8) */
 	test %ax,%ax
-        jz .Lread_part
+        jnz .Lb1_err_gptsig
 
-	movw $(fatal_gpt_sig),%ax		/* panic if GPT header signature is not OK */
-	call puts16				/* XXX: place for improvement? try the backup one */
-	jmp panic16
-
-.Lread_part:
 	/* store the important GPT header vars */
-	movw $BUFADDR, %di
-	movl 72(%di), %eax			/* save 64b LBA of partition entry */
-	movl %eax, (gpt_partition_entry_lba)
-	movl 76(%di), %eax
-	movl %eax, (gpt_partition_entry_lba+4)
+	movw $ADDR_SIBPBUF, %di
 
-	movl 80(%di), %eax			/* number of partitions */
-	movl %eax, (gpt_nr_partitions)
+	movl OFST_GPT_HDR_LBA_START(%di), %eax		/* save 64b LBA of partition entry */
+	movl %eax, (q_gpt_partition_entry_lba)
+	movl OFST_GPT_HDR_LBA_START+4(%di), %eax
+	movl %eax, (q_gpt_partition_entry_lba+4)
 
-	movl 84(%di), %eax			/* size of a partition entry */
-	movl %eax, (gpt_size_partition_entry)
+	movl OFST_GPT_HDR_NR_ENTRIES(%di), %eax		/* number of partitions */
+	movl %eax, (l_gpt_nr_partitions)
+
+	movl OFST_GPT_HDR_ENTRY_SZ(%di), %eax		/* size of a partition entry */
+	movl %eax, (l_gpt_size_partition_entry)
 
 	/* Few articles mention primary partition header is most likely spread on 2-33 LBA.
 	 * UEFI standard say to follow the header. Size may be uneven. Due to this I need to
 	 * check what can I fit into my cache buffer.
-	 * I thought I'd support variable sector size but was told that with BIOS 512 is really the only practical option.
 	 *
-	 * I'm assuming sector size 512 so few things should be simplier. I need to find out:
-	 *	- how many partitions can buffer hold: BUFSZ/gpt_size_partition_entry
+	 * I'm assuming sector size 512. I need to find out:
+	 *	- how many partitions can buffer hold: GENERIC_BUFSZ/l_gpt_size_partition_entry
 	 *	- how many times do I need to read the whole partition header: full rounds (full buffer) + leftovers
 	 *	- if there are leftovers I need to know how many sectors I need to read them all
 	*/
 
 	xorl %edx,%edx
-	movl $BUFSZ, %eax
-	movzxw (gpt_size_partition_entry), %ecx
+	movl $GENERIC_BUFSZ, %eax
+	movl (l_gpt_size_partition_entry), %ecx
 	div %ecx
-	movw %ax, (items_in_buf)		/* partitions buffer can hold */
+	movw %ax, (w_items_in_buf)			/* partitions buffer can hold */
 
-	test %ax,%ax				/* we need to be able to hold at least one partition */
-	jnz .Lread_part.1
+	test %ax,%ax					/* we need to be able to hold at least one partition */
+	jz .Lb1_err_bufsz
 
-	movw $(fatal_bufsz), %ax
-	call puts16
-	jmp panic16
-
-.Lread_part.1:
-	/* if gpt_nr_partitions < items_in_buf rounds will be 0 and we skip to leftovers */
-	movzxw (gpt_nr_partitions), %ecx	/* rounds = gpt_nr_partitions / items_in_buf */
-	xchgl %ecx, %eax			/* leftovers = gpt_nr_partitions % items_in_buf */
+	/* if l_gpt_nr_partitions < w_items_in_buf w_rounds will be 0 and we skip to w_leftovers */
+	movl (l_gpt_nr_partitions), %ecx		/* w_rounds = l_gpt_nr_partitions / w_items_in_buf */
+	xchgl %ecx, %eax				/* w_leftovers = l_gpt_nr_partitions % w_items_in_buf */
 	div %ecx
-	movw %ax, (rounds)
-	movw %dx, (leftovers)
+	movw %ax, (w_rounds)
+	movw %dx, (w_leftovers)
 
 	.ifdef DEBUG_VERBOSE
 		pushw %ax
-		pushw (leftovers)
-		pushw (rounds)
-		pushw (items_in_buf)
-		pushw (sectors_in_buf)
+		pushw (w_leftovers)
+		pushw (w_rounds)
+		pushw (w_items_in_buf)
+		pushw (w_sectors_in_buf)
 		pushw $(dbgmsg_buf_info)
 		call printf16
 		addw $10, %sp
 		pop %ax
 
-		xorw %di, %di			/* keep start-end partition values */
+		xorw %di, %di	/* keep start-end partition values */
 		xorw %si, %si
 	.endif
 
-	/* common setup even if we need to do leftovers only */
-	movw $BUFADDR, (dap_buf)		/* buffer to read to */
-	movl (gpt_partition_entry_lba), %edx	/* LBA to start with */
-	movl %edx, (dap_start)
-	movl (gpt_partition_entry_lba+4), %edx
-	movl %edx, (dap_start+4)
+	/* common setup even if we need to do w_leftovers only */
+	movw $ADDR_SIBPBUF, (w_dap_buf)			/* buffer to read to */
+	movl (q_gpt_partition_entry_lba), %edx		/* LBA to start with */
+	movl %edx, (q_dap_start)
+	movl (q_gpt_partition_entry_lba+4), %edx
+	movl %edx, (q_dap_start+4)
 
 	/* check if we need to do leftovers only */
-	test %ax,%ax				/* ax still holds rounds from calculation above */
-	jz .Ldo_leftovers
+	test %ax,%ax					/* ax still holds w_rounds from calculation above */
+	jz .Lb1_leftovers
 
-	movw (rounds),%cx			/* we need to read full buffer rounds times */
-	movw (sectors_in_buf), %ax		/* LBAs to read, as much as we fit into buffer  */
-	movw %ax,(dap_sectors)
+	movw (w_rounds),%cx				/* we need to read full buffer w_rounds times */
+	movw (w_sectors_in_buf), %ax			/* LBAs to read, as much as we fit into buffer  */
+	movw %ax,(w_dap_sectors)
 
-.Lrounds:
+.Lb1_rounds:
 	.ifdef DEBUG_VERBOSE
 		push %cx
-		addw (items_in_buf), %si
+		addw (w_items_in_buf), %si
 		pushw %si
 		pushw %di
 		pushw $(dbgmsg_part_range)
@@ -320,56 +194,56 @@ _start:
 		pop %cx
 	.endif
 
-	xchg %cx, %bp				/* save cx */
-	call do_read				/* do_read() */
+	xchg %cx, %bp					/* save cx */
+	call do_read
 
-	movw (items_in_buf), %ax
-	call search_uuid_buf			/* search for the uuid */
-	xchg %bp, %cx				/* restore cx */
+	movw (w_items_in_buf), %ax
+	call search_uuid_buf				/* search for the uuid */
+	xchg %bp, %cx					/* restore cx */
 
 	test %ax,%ax
-	jnz .Lfound_part
+	jnz .Lb1_partition_found
 
 	.ifdef DEBUG_VERBOSE
 		mov %si, %di
 	.endif
 
-	movzxw (sectors_in_buf), %eax		/* prepare for next read */
-	addl %eax, (dap_start)			/* start LBA is 64b, advance by sectors_in_buf */
-	adcl $0, (dap_start+4)
-	loop .Lrounds
+	movzxw (w_sectors_in_buf), %eax			/* prepare for next read */
+	addl %eax, (q_dap_start)			/* start LBA is 64b, advance by w_sectors_in_buf */
+	adcl $0, (q_dap_start+4)
+	loop .Lb1_rounds
 
-.Ldo_leftovers:
+.Lb1_leftovers:
 	.ifdef DEBUG_VERBOSE
-		movw $(dbgmsg_doleftovers), %ax
+		movw $(dbgmsg_dow_leftovers), %ax
 		call puts16
 	.endif
 
-	movzxw (leftovers), %ecx		/* if we don't have any leftovers */
-	test %ecx,%ecx				/* we have nothing to do, panic */
-	jz .Lnopart
+	movzxw (w_leftovers), %ecx			/* if we don't have any w_leftovers */
+	test %ecx,%ecx					/* we have nothing to do, panic */
+	jz .Lb1_err_nopart
 
 	xorl %edx, %edx
-	movl (gpt_size_partition_entry), %eax
-	movzxw (bp_sector_size), %ebx
-	mul %ecx				/* (gpt_size_partition_entry * leftovers) / bp_sector_size */
+	movl (l_gpt_size_partition_entry), %eax
+	movzxw (w_bp_sector_size), %ebx
+	mul %ecx					/* (l_gpt_size_partition_entry * w_leftovers) / w_bp_sector_size */
 	div %ebx
-	test %edx,%edx				/* if we have reminder we need to add one more sector to read */
-	jz .Ldo_leftovers.1
+	test %edx,%edx					/* if we have reminder we need to add one more sector to read */
+	jz .Lb1_leftovers.1
 	inc %eax
 
-.Ldo_leftovers.1:
+.Lb1_leftovers.1:
 	.ifdef DEBUG_VERBOSE
 		pushw %ax
 		pushw %cx
 
-		pushw (bp_sector_size)
+		pushw (w_bp_sector_size)
 		pushw %ax
-		pushw (leftovers)
+		pushw (w_leftovers)
 		pushw $(dbgmsg_leftovers_stats)
 		call printf16
 
-		addw (leftovers), %si
+		addw (w_leftovers), %si
 		pushw %si
 		pushw %di
 		pushw $(dbgmsg_part_range)
@@ -379,30 +253,29 @@ _start:
 		pop %ax
 	.endif
 
-	/* buffer and start LBA were set before rounds were done. If we did rounds start LBA is pointing to */
-	/* LBA that should be read next. */
-	movw %ax, (dap_sectors)
+	/* Buffer and start LBA were set before rounds were done.
+	   If we did rounds start LBA is pointing to LBA that should be read next.
+	*/
+	movw %ax, (w_dap_sectors)
 	call do_read
 
-	movw (leftovers), %ax
+	movw (w_leftovers), %ax
 	call search_uuid_buf
-
 	test %ax, %ax
-	jz .Lnopart
+	jz .Lb1_err_nopart
 
-.Lfound_part:
+.Lb1_partition_found:
 	movw %ax, %di					/* di - buffer where partition was found */
-
 	movw $8, %cx					/* copy start and end LBA to boot_partition */
-	leaw 0x20(%di), %dx				/* it's probably faster to copy these two locations */
-	movw $(bp_lba_start), %ax
+	leaw OFST_GPT_PART_ENTRY_LBA_START(%di), %dx
+	movw $(q_bp_lba_start), %ax
 	call memcpyw16
 
 	.ifdef DEBUG_VERBOSE
-		movw 0x20(%di), %ax
-		pushw %ax
+		pushw OFST_GPT_PART_ENTRY_LBA_START(%di)
 		pushw $(dbgmsg_bpart_lba)
 		call printf16
+		addw $4, %sp
 	.endif
 
 	movl $(boot_partition), %eax			/* initialize ext2 module */
@@ -413,78 +286,111 @@ _start:
 	movw $(strkernel), %ax
 	call ext2_search_file				/* ext2_search_file("/boot/kernel") */
 	testw %ax,%ax
-	jz .Lnokernel
+	jz .Lb1_err_nokernel
 
 	/* ax: inode structure */
 	call elf32_load_file
 	testw %ax,%ax
-	jnz haltme
+	jnz .Lb1_haltme
 
 	/* prepare to jump */
         cli
         lgdt (gdt_desc)
-        movl %cr0, %eax                         /* enable protected mode */
+        movl %cr0, %eax      				/* enable protected mode */
         orl $1, %eax
         movl %eax, %cr0
 
-	pushl $(smap)				/* argument to entry */
-        ljmpl $8, $ADDR_KERNEL_ENTRY		/* flush instruction cache and set the proper cs selector */
+	pushl $(smap)					/* argument to entry */
+        ljmpl $8, $ADDR_KERNEL_ENTRY			/* flush instruction cache and set the proper cs selector */
 
-	cli
-	hlt
+	jmp .Lb1_haltme
 
-.Lnokernel:
+	/* Handle errors */
+.Lb1_err_bufsz:
+	movw $(fatal_bufsz), %ax
+	call puts16
+	jmp panic16
+
+.Lb1_err_gptsig:
+	movw $(fatal_gpt_sig),%ax
+	call puts16
+	jmp panic16
+
+.Lb1_err_unsupp_sectorsz:
+	pushw %ax
+	pushw $(fatal_secsize)
+	call printf16
+	jmp panic16
+
+.Lb1_err_errno_panic:
+	call print_err
+	jmp panic16
+
+.Lb1_err_e820:
+	movw $(msg_mem_err), %ax
+	call puts16
+	jmp panic16
+
+.Lb1_err_a20:
+	pushw $(fatal_a20)
+	call printf16
+	jmp panic16
+
+.Lb1_err_nopart:
+	movw $(fatal_nopart), %ax
+	call puts16
+	jmp panic16
+
+.Lb1_err_nokernel:
 	pushw $(strkernel)
 	pushw $(fatal_nokernel)
 	call printf16
 	/* fall through to halt */
 
-haltme:
-	movw $(debug_info_halt), %ax
+.Lb1_haltme:
+	movw $(msg_haltnow), %ax
 	call puts16
+.Lb1_haltme.1:	/* zicher loop */
 	cli
 	hlt
-
-.Lnopart:
-	movw $(fatal_nopart), %ax
-	call puts16
-	jmp panic16
+	jmp .Lb1_haltme.1
 
 
 /* void* search_uuid_buf(int16_t n)
  *
- * search for partition uuid in the cache; returns ptr to the partition header if found, NULL otherwise
+ * search for partition uuid in the buf
+ * returns ptr to the partition header if found, NULL otherwise
 */
 .func search_uuid_buf
 search_uuid_buf:
 	pushw %si
 	pushw %di
 
-	movw %ax, %cx				/* n */
-	movw $BUFADDR, %si			/* si = start of the partition header */
+	movw %ax, %cx					/* n */
+	movw $ADDR_SIBPBUF, %si				/* si = start of the partition header */
 
-.Lsearch:
-	movw %cx, %di				/* save cx */
+.Lb1_sbuf:
+	movw %cx, %di					/* save cx */
 
 	movw $16, %cx
 	movw $(linux_ext2_uuid), %dx
 	movw %si, %ax
-	call memcmp16				/* memcmp16(partuuid, linux_ext2_uuid, 16) */
-	movw %di, %cx				/* restore cx */
+	call memcmp16					/* memcmp16(partuuid, linux_ext2_uuid, 16) */
+	movw %di, %cx					/* restore cx */
 
-	test %ax, %ax				/* partition found */
-	jz .Lfound
+	test %ax, %ax					/* partition found */
+	jz .Lb1_sbuf_found
 
-	addw (gpt_size_partition_entry), %si	/* move to next entry */
-	loop .Lsearch
+	addw (l_gpt_size_partition_entry), %si		/* move to next entry */
+	loop .Lb1_sbuf
 
 	// not found
-	xorw %ax, %ax				/* return NULL by default */
-	jmp .Lsdone
+	xorw %ax, %ax					/* return NULL by default */
+	jmp .Lb1_sbuf_done
 
-.Lfound:
+.Lb1_sbuf_found:
 	movw %si, %ax
-.Lsdone:
+.Lb1_sbuf_done:
 	pop %di
 	pop %si
 	ret
@@ -493,17 +399,18 @@ search_uuid_buf:
 
 /* do_read()
  *
- * wrapper func to diskread16, uses bp_bootdrive,dap defined here in boot1.S. read failure means panic
+ * wrapper func for diskread16
+ * uses w_bp_bootdrive, local dap packet defined here in boot1.S. read failure means panic
 */
 .func do_read
 do_read:
-	.ifdef DEBUG_VERBOSE			/* verbose logging only */
+	.ifdef DEBUG_VERBOSE
 		.if DEBUG_VERBOSE > 1
 		push %bx
 		leaw (lba_dap), %bx
 		pushw 2(%bx)
 
-		pushl 8(%bx)			/* we are printing it as BE, or LTR */
+		pushl 8(%bx)		/* we are printing it as BE, or LTR */
 		pushl 12(%bx)
 
 		pushw 4(%bx)
@@ -515,11 +422,11 @@ do_read:
 	.endif
 
 	leaw (lba_dap), %dx
-	movw (bp_bootdrive), %ax
-	call diskread16				/* read16(int16_t disk, struct lba_dap* dap) */
+	movw (w_bp_bootdrive), %ax
+	call diskread16			/* read16(int16_t disk, struct lba_dap* dap) */
 
 	test %ax,%ax
-	jz .Lend_do_read
+	jz .Lb1_doread_end
 
 	movzxb (errno16), %ax
 	push %ax
@@ -527,7 +434,7 @@ do_read:
 	call printf16
 	jmp panic16
 
-.Lend_do_read:
+.Lb1_doread_end:
 	ret	
 .endfunc
 
@@ -578,16 +485,15 @@ panic16:
         lba_dap:
 				.byte 0x10	/* size of the packet */
 				.byte 0		/* reserved */
-		dap_sectors:	.word 0		/* how many LBAs to read */
-                dap_buf:	.word 0,0	/* adress to read into */
-                dap_start:	.quad 0		/* LBA */
+		w_dap_sectors:	.word 0		/* how many LBAs to read */
+                w_dap_buf:	.word 0,0	/* adress to read into */
+                q_dap_start:	.quad 0		/* LBA */
 
-	// XXX: maybe this should be part of the multiboot structure
-	//  XXX: for now we can pass this as an argument to kernel_main
 	/* smap entry is:
 		.quad base, length
 		.long type, xattr (acpi 3)
 	*/
+	// XXX: does it make sense to put in bss ?
 	.align 8
 	.global smap, smap_data
 	smap:
@@ -595,32 +501,22 @@ panic16:
 	smap_data:
 		.zero 1536                              /* actual data, 24*64 = 1536 */
 
-	// struct boot_partition {
-	//	uint64_t	bp_lba_start;
-	//	uint64_t	bp_lba_end;
-	//	uint64_t	bp_sectors
-	//	uint16_t	bp_bootdrive;
-	//	uint16_t	bp_sector_size;
-	// }
-
 	boot_partition:
-		bp_lba_start:	.quad 0			/* start LBA of the partition */
-		bp_lba_end:	.quad 0			/* end LBA of the partition */
-		bp_sectors:	.quad 0			/* total disk capacity */
-		bp_bootdrive:	.word 0			/* bp_bootdrive as reported by BIOS */
-		bp_sector_size:	.word 0			/* sector size of the disk */
-
-	bufsize:			.word 0		/* actual buffer size, adjusted to hold n sector-size blocks */
+		q_bp_lba_start:		.quad 0		/* start LBA of the partition */
+		q_bp_lba_end:		.quad 0		/* end LBA of the partition */
+		q_bp_sectors:		.quad 0		/* total disk capacity */
+		w_bp_bootdrive:		.word 0		/* w_bp_bootdrive as reported by BIOS */
+		w_bp_sector_size:	.word 0		/* disk sector size */
 
 	/* GPT hdr vars */
-	gpt_partition_entry_lba:	.quad 0
-	gpt_nr_partitions:		.long 0
-	gpt_size_partition_entry:	.long 0
+	q_gpt_partition_entry_lba:	.quad 0
+	l_gpt_nr_partitions:		.long 0
+	l_gpt_size_partition_entry:	.long 0
 
-	items_in_buf:			.word 0		/* amount of partitions we can hold in buf */
-	sectors_in_buf:			.word 0		/* buffer size in sectors ; XXX: used when I thought I do support for different sector sizes.. */
-	rounds:				.word 0		/* how many full passes i can make when reading partitions */
-	leftovers:			.word 0		/* leftover partitons to read */
+	w_items_in_buf:			.word 0		/* amount of partitions we can hold in buf */
+	w_sectors_in_buf:		.word 0		/* buffer size in sectors */
+	w_rounds:			.word 0		/* how many full passes i can make when reading partitions */
+	w_leftovers:			.word 0		/* leftover partitons to read */
 
 
 	/* GDT table definiion */
@@ -686,24 +582,19 @@ panic16:
 	fatal_nokernel:	.asciz	"%s not found.\r\n"
 	msg_bios_err:	.asciz	"BIOS function failed, error code: %x\r\n"
 	msg_mem_err:	.asciz	"Failed to get memory map from BIOS.\r\n"
+	msg_haltnow:	.asciz	"boot1: system halted for now.\r\n"
 
 	panic_stack:	.asciz	"stack:\r\n"
-
 	func_debug1:	.asciz	"debug: 0x%x\r\n"
-
-	initmsg:	.asciz	"ext2_initmod returned %d, errno: %d\r\n"
 
 	.ifdef DEBUG_VERBOSE
 		dbgmsg_verbose:		.asciz	"verbose boot enabled.\r\n"
 		dbgmsg_diskinfo:	.asciz	"bootdisk: 0x%x, sector size: %d, total LBAs: 0x%lx%lx\r\n"
-		dbgmsg_buf_info:	.asciz	"bufsize: %d sectors, %d partitions. rounds: %d, leftovers: %d\r\n"
+		dbgmsg_buf_info:	.asciz	"bufsize: %d sectors, %d partitions. rounds: %d, w_leftovers: %d\r\n"
 		dbgmsg_part_range:	.asciz	"partition range: <%d,%d)\r\n"
 		dbgmsg_doread_stats:	.asciz	"do_read: buf: 0x%x, start lba: 0x%lx%lx, sectors: %d\r\n"
 		dbgmsg_bpart_lba:	.asciz	"boot partition LBA start: 0x%x\r\n"
-		dbgmsg_doleftovers:	.asciz	"doing leftovers\r\n"
+		dbgmsg_dow_leftovers:	.asciz	"doing w_leftovers\r\n"
 		dbgmsg_leftovers_stats:	.asciz	"%d leftovers need %d %d-sectors to read\r\n"
 	.endif
 
-	debug_info_halt:	.asciz	"boot1: system halted for now.\r\n"
-	debug_xxx_test:	.asciz	"this is %x, this is %lx\r\n"
-	debug_xxx_test2: .asciz	"attemp to jump to kernel\r\n"

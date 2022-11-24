@@ -27,7 +27,7 @@ gboot:	$(SRCO)
 	objcopy -v -O binary $(OBJDIR)/gboot.bin $(OBJDIR)/gboot
 
 # boot1 requires LINKADDR as it loads gdt which requires linear address
-boot1.o: boot1.S
+boot1.o: boot1.S gboot.inc
 	$(AS) $(ASFLAGS) boot1.S -o $(OBJDIR)/boot1.o
 
 ext2.o: ext2.S gboot.inc
