@@ -8,7 +8,6 @@ Kernel is being searched in "/boot/kernel". Symlinks are supported. <br /><br />
 elf32 loader loads the PT_LOAD segments of the kernel.
 
 ## TODO
-***WIP Change the logic of the jmp, i.e. don't jump in case of an unlikely situation. <br />***
 boot/ext2.S	ext2_inode_seek() : doubly/triply indirect search not implemented yet<br />
 kernel/*	need to adjust idt.S to work with regparm=3
 
