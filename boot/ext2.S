@@ -1186,25 +1186,8 @@ ext2_access_inode:
 	subl $32, %esp
 
 	test %eax,%eax						/* inum can't be 0 */
-	jnz .Lai_not0
+	jz .Lai_inum0
 
-.Lai_err:
-	.ifdef EXT2_DEBUG_VERBOSE
-		.if EXT2_DEBUG_VERBOSE > 2
-		pushl %eax
-		movw $(ext2_access_inode_msg_err2), %ax
-		call puts16
-		popl %eax
-		.endif
-	.endif
-
-	/* used for all errors in this function */
-.Lai_err_cleanup:
-	addl $32, %esp
-	stc
-	jmp .Lai_end2
-
-.Lai_not0:
 	movl %eax, %edi						/* save inum for later */
 	movl %edx, %esi						/* save struct* inode for later */
 	movl %ecx, -16(%ebp)					/* block buffer */
@@ -1243,39 +1226,53 @@ ext2_access_inode:
 	movl -20(%ebp), %eax
 	call ext2_access_gde
 	test %ax, %ax
-	jz .Lai_agok						/* CF is ignored on access_gde, ax indicates error though */
+	jnz .Lai_err_ag						/* CF is ignored on access_gde, ax indicates error though */
 
+	movl (l_bg_inode_table), %eax				/* l_bg_inode_table + bix */
+	addl -8(%ebp), %eax
+	movl -16(%ebp), %edx					/* block buffer */
+	call ext2_access_block
+	test %ax,%ax
+	jz .Lai_err_do_cleanup
+
+	/* eax points to the buffer of read inodes, idx2 indexes it to the correct one */
+	movw (w_ext2_inode_size_exp), %cx			/* use precomputed exponent of the inode size */
+	movl -12(%ebp), %edx					/* idx2 */
+	shll %cl, %edx
+	addl %eax, %edx						/* offset to inode I'm looking for */
+	movl %esi, %eax
+	movw (w_ext2_sb_inode_size), %cx
+	call memcpy16
+	xorl %eax,%eax						/* indicate success */
+	jmp .Lai_end
+
+	/* accees gde failed */
+.Lai_err_ag:
 	pushw %ax						/* first error message is print */
 	pushw %di
 	pushw $(ext2_access_inode_msg_err)
 	call printf16
 	addw $4, %sp
 	popw %ax						/* error from ext2_access_gde */
-	jmp .Lai_err_cleanup					/* jump to error code, set CF and exit */
+	jmp .Lai_err_do_cleanup					/* jump to error code, set CF and exit */
 
-.Lai_agok:
-	movl (l_bg_inode_table), %eax			/* l_bg_inode_table + bix */
-	addl -8(%ebp), %eax
-	movl -16(%ebp), %edx				/* block buffer */
-	call ext2_access_block
-	test %ax,%ax
-	jz .Lai_err_cleanup
+	/* invalid inum */
+.Lai_inum0:
+	pushl %eax
+	movw $(ext2_access_inode_msg_err2), %ax
+	call puts16
+	popl %eax
+	/* fall through to cleanup */
 
-.Lai_abok:
-	/* eax points to the buffer of read inodes, idx2 indexes it to the correct one */
-	movw (w_ext2_inode_size_exp), %cx		/* use precomputed exponent of the inode size */
-	movl -12(%ebp), %edx				/* idx2 */
-	shll %cl, %edx
-	addl %eax, %edx					/* offset to inode I'm looking for */
-	movl %esi, %eax
-	movw (w_ext2_sb_inode_size), %cx
-	call memcpy16
-	xorl %eax,%eax					/* indicate success */
+.Lai_err_do_cleanup:						/* clean the stack and indicate error */
+	addl $32, %esp
+	stc
+	jmp .Lai_end_afterstack
 
 .Lai_end:
 	addl $32, %esp
 
-.Lai_end2:
+.Lai_end_afterstack:
 	popl %ebp
 	popl %edi
 	popl %esi
