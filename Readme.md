@@ -9,7 +9,8 @@ elf32 loader loads the PT_LOAD segments of the kernel.
 
 ## TODO
 ***WIP Change the logic of the jmp, i.e. don't jump in case of an unlikely situation. 
-finally after these months I can work on kernel again .. don't recall what I did - idt.S requires some rethinking and fixing
+boot/ext2.S	ext2_inode_seek() : doubly/triply indirect search not implemented yes
+kernel/*	need to adjust idt.S to work with regparm=3
 
 ## NOTES
 Do a cleanup of the gboot code. Lots of 16/32b assembly mixed together.
