@@ -17,7 +17,8 @@ ASFLAGS=
 LDFLAGS=-T ../kernel/kernlink.ld --defsym LINKADDR=$(LINKADDR)
 
 # https://elixir.bootlin.com/linux/v4.20.17/source/arch/x86/Makefile
-CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4 -mregparm=3
+CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4
+#-mregparm=3
 CFLAGS+=-I$(INCDIR) -DDEBUG -DDEBUG_TRAP -DDEBUG_PM
 #CFLAGS+=-DDEBUG_IRQ -DDEBUG_TRAP
 

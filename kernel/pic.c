@@ -285,12 +285,14 @@ void init_idt() {
 void irq0_handler(__attribute__ ((unused)) struct irqframe* f) {
 	ticks++;
 	//asm("cli;hlt");
+
 	send_8259_EOI(0);
 }
 
+// XXX: wait a minute .. who's passing argument to irq1_handler ? probably trap_dispatch()
 void irq1_handler(struct irqframe* f) { 
 	uint8_t scancode = inb(0x60);
-	printf("scan code: %x\n", scancode);
+	printf("frame: %p, scan code: %x\n", f, scancode);
 
 	// XXX: debugging ; this really should not be part of the irq1 handler
 	switch(scancode) {
@@ -344,6 +346,7 @@ void debug_status_8259(char* caller) {
 	printf("%s: slave: IRR: %x (pending ACKs), IMR: %x (mask), ISR: %x (EOI waiting)\n", caller, r1,r2,r3);
 }
 
+// XXX: this is actually being installed by entry.S !
 void debug_install_irq1(void) {
 	irq_handlers[1] = irq1_handler;
         clear_irq(1);

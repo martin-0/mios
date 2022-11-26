@@ -1,5 +1,7 @@
 /* martin */
 
+// XXX: TODO: code was created without regparm=3 in mind
+
 .section .text
 	.code32
 
@@ -38,6 +40,7 @@ irq_main_handler:
 	jmp irq_dispatch
 	pushl $0xf
 	jmp irq_dispatch
+
 
 .global irq_dispatch
 irq_dispatch:
@@ -138,7 +141,6 @@ trap_dispatch:
 		regs32
 	*/
 
-
 	pushl %esp				// trapframe
 	leal (trap_handlers), %ebx		// trap_handlers[]
         movl 0x2c(%esp), %esi                   /* trapno saved on stack */
@@ -147,7 +149,7 @@ trap_dispatch:
 
 	/* XXX: let's treat all traps 0-31 as fatal for now  */
 
-	pushl $(halted)
+	pushl $(debug_halted)
 	call printf
 	addl $4, %esp
 
@@ -235,4 +237,4 @@ trap_bad_dummy:
 			.long start_trap12, start_trap13, start_trap14, start_trap15, start_trap16, start_trap17, start_trap18, start_trap19, start_trap20, start_trap21
 			.long start_trap22, start_trap23, start_trap24, start_trap25, start_trap26, start_trap27, start_trap28, start_trap29, start_trap30, start_trap31
 
-	halted: .asciz "System halted.\n"
+	debug_halted: .asciz "System debug_halted.\n"
