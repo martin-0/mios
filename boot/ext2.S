@@ -41,54 +41,13 @@
 
 .include "gboot.inc"
 
-	.set EXT2_MAGIC, 0xef53
-	.set EXT2_SIZE_LOG_UNIT, 1024			/* block size: EXT2_SIZE_LOG_UNIT << s_log_block_size */
-	.set EXT2_DEFAULT_INODE_SIZE, 0x80
-
-	.set EXT2_OFST_SUPERBLOCK, 0x400		/* offset from the beginning of the ext2 FS to superblock (independent of the block size) */
-	.set EXT2_SB_OFST_ALLBLOCKS,4			/* s_blocks_count */
-	.set EXT2_SB_OSFT_LOGBS, 0x18			/* s_log_block_size */
-	.set EXT2_SB_OFST_BLOCK_PG, 0x20		/* s_blocks_per_group */
-	.set EXT2_SB_OFST_INODES_PG, 0x28		/* s_inodes_per_group */
-	.set EXT2_SB_OFST_MAGIC, 0x38			/* s_magic */
-	.set EXT2_SB_OFST_STATE, 0x3a			/* s_state */
-	.set EXT2_SB_OFST_ERR, 0x3c			/* s_error */
-	.set EXT2_SB_OSFT_REV_LEVEL, 0x4c		/* s_rev_level */
-	.set EXT2_SB_OFST_INODE_SZ, 0x58		/* s_inode_size */
-
-	.set SECTORSZ, 512				/* disk sector size */
-	.set PAGE_SIZE, 0x1000
-	.set SECTORS_IN_BUF, 8				/* statically computed from PAGE_SIZE/512 = 8; buffers are PAGE_SIZE big */
-
-	/* enums */
-	.set ETOOBIG, 1
-	.set ENOMAGIC, 2
-	.set EBSUNSUPP, 3
-	.set EFSPANIC, 4
-	.set EINODESZ, 5
-	.set ENOBLOCKS, 6
-	.set ENOBLCPG, 7
-	.set ENOINOPG, 8
-	.set EBLKINODE, 9
-
-	/* inode mode */
-	.set S_IFMT, 0xF000				/* mask to be used for inode.i_mode */
-	.set S_IFDIR, 0x4000				/* inode is a directory */
-	.set S_IFREG, 0x8000				/* inode is a regular file */
-	.set S_IFLNK, 0xa000				/* inode is a symlink */
-
-	.set NAME_LEN, 255				/* max name size */
-	.set PATH_MAX, 4096
-	.set MAX_SYMLINK_FOLLOW, 40			/* how deeep to follow symlinks */
-	.set FAST_SYMLINK_SIZE, 60			/* symlink's data is in its inode if len not more than FAST_SYMLINK_SIZE */
-
 .section .text
 	.code16
 
 
 /* int ext2_initmod(boot_partition *bp)
  *
- * returns 0 if OK
+ * returns: 0 if OK
 */
 .global ext2_initmod
 .func ext2_initmod
@@ -117,7 +76,7 @@ ext2_initmod:
 
 	/* we can't use access_block yet, we need superblock first */
 	movl $ADDR_READBUF, %ecx
-	movl $SECTORS_IN_BUF, %edx
+	movl $SECTORS_IN_EXT2BUF, %edx
 	movl (q_part_lba_start), %eax			/* set start LBA of partition */
 	call ext2_readdisk
 	test %ax,%ax					/* ax is set to 1 along with errno16 in case of an error */
@@ -278,9 +237,9 @@ ext2_initmod:
 
 	/* ext2 magic not found */
 .Lim_err_magic:
-	movw $(ext2_init_nomagic), %ax			/* partition doesn't have magic word, rejecting to continue */
+	movw $(ext2_init_nomagic), %ax				/* partition doesn't have magic word, rejecting to continue */
 	call puts16
-	movw $ENOMAGIC, %ax				/* set error code */
+	movw $ENOMAGIC, %ax					/* set error code */
 	jmp .Lim_end
 
 	/* ext2 partition beyond 32b limit */
@@ -303,7 +262,7 @@ ext2_initmod:
 /* struct inode*  ext2_search_file(char* filepath)
  *
  * search for the file in the filepath. filepath has to be an absolute path. if found return the struct inode pointer.
- * return: ptr to inode if OK, NULL otherwise
+ * returns: ptr to inode if OK, NULL otherwise
 */
 .global ext2_search_file
 .func ext2_search_file
@@ -509,7 +468,6 @@ ext2_search_file:
 /* int ext2_handle_symlink(struct* inode, char* token)
  *
  * resolve the symlink and continue with the path resolution
- *
  * returns: 0 if OK
 */
 .global ext2_handle_symlink
@@ -526,7 +484,7 @@ ext2_handle_symlink:
 	inc %cl
 	movb %cl, (b_ext2_symlink_depth)
 	cmpw $MAX_SYMLINK_FOLLOW, %cx
-	jae .Lhs_lim_err
+	jae .Lhs_err_symlink_limit
 
 	/* check if the name size fits the FAST_SYMLINK */
 	movl INODE_OFST_ISIZE(%esi), %eax		/* inode size */
@@ -549,7 +507,7 @@ ext2_handle_symlink:
 	movl %ebx, %eax
 	call strlen32
 	cmpl $NAME_LEN, %eax
-	ja .Lhs_name_toolong
+	ja .Lhs_err_name_toolong
 
 	/* copy symlink to temporary buffer */
 	movl %ebx, %edx
@@ -574,7 +532,7 @@ ext2_handle_symlink:
 	movl $ADDR_TIBPBUF, %eax
 	call strlen32
 	cmpl $PATH_MAX, %eax
-	ja .Lhs_path_toolong
+	ja .Lhs_err_path_toolong
 
 	movl $ADDR_TIBPBUF, %edx			/* update the pathbuf with new path */
 	movl $pathbuf, %eax
@@ -590,17 +548,17 @@ ext2_handle_symlink:
 	.endif
 
 	/* pathbuf is now updated. strtok routine has to be updated now in search_file() */
-
 	xorl %eax,%eax
 	jmp .Lhs_end
 
-.Lhs_path_toolong:
+	/* path too long */
+.Lhs_err_path_toolong:
 	movw $(ext2_search_file_path_toolong), %ax
 	call puts16
 	jmp .Lhs_err
 
-.Lhs_name_toolong:
 	/* name too long */
+.Lhs_err_name_toolong:
 	pushw $NAME_LEN
 	pushw %ax
 	pushw $(ext2_handle_symlink_name_toolong)
@@ -608,8 +566,8 @@ ext2_handle_symlink:
 	addw $6, %sp
 	jmp .Lhs_err
 
-.Lhs_lim_err:
 	/* max symlink depth reached */
+.Lhs_err_symlink_limit:
 	pushw %cx
 	pushw $(ext2_handle_symlink_err)
 	call printf16
@@ -629,8 +587,7 @@ ext2_handle_symlink:
 
 /* int ext2_search_in_dirnode(struct* inode, char* matchstr, char* blockbuf)
  *
- * returns inode of matchstr
- * returns 0 if matchstr not found
+ * returns: inode of matchstr, 0 otherwise
 */
 .global ext2_search_in_dirnode
 .func ext2_search_in_dirnode
@@ -665,15 +622,8 @@ ext2_search_in_dirnode:
 	movw (%esi), %ax
 	andw $S_IFMT, %ax
 	cmpw $S_IFDIR, %ax
-	je .Lsde_isdir
+	jne .Lsde_err_notadir
 
-	/* can't proceed with inode is not a directory */
-	movw $(ext2_search_in_dirnode_err), %ax
-	call puts16
-	xorl %eax, %eax
-	jmp .Lsde_err					/* handle error */
-
-.Lsde_isdir:
 	movl %esi, %ebx					/* ebx: inode  */
 	addl $INODE_OFST_DBP_0, %ebx			/* pointing to first direct block pointer */
 
@@ -685,17 +635,8 @@ ext2_search_in_dirnode:
 
 	movl -8(%ebp),%edx				/* block buf */
 	call ext2_access_block
-	jnc .Lsde_search_direct_blocks.abok		/* handle error */
+	jc .Lsde_err_ab					/* handle error */
 
-	.ifdef EXT2_DEBUG_VERBOSE
-		pushl (%ebx)				/* display error and return 0 */
-		pushw $(ext2_search_in_dirnode_err2)
-		call printf16
-		addw $6, %sp
-	.endif
-	jmp .Lsde_err					/* handle error */
-
-.Lsde_search_direct_blocks.abok:
 	/* eax points to the bufcache location */
 	movl %edi, %edx					/* string to find */
 	call ext2_walk_dir_entry_nohash
@@ -814,18 +755,35 @@ ext2_search_in_dirnode:
 	xorl %eax,%eax		/* we searched it all and didn't find it */
 	jmp .Lsde_end
 
+	/* error during access block operation */
+.Lsde_err_ab:
+	.ifdef EXT2_DEBUG_VERBOSE
+		pushl (%ebx)	/* block id */
+		pushw $(ext2_search_in_dirnode_err2)
+		call printf16
+		addw $6, %sp
+	.endif
+	jmp .Lsde_err
+
+	/* inode not a directory */
+.Lsde_err_notadir:
+	movw $(ext2_search_in_dirnode_err), %ax
+	call puts16
+	xorl %eax, %eax
+	/* fall through to error */
+
 .Lsde_err:
 	movw $(ext2_search_in_dirnode_err3), %ax		/* critical error */
 	call puts16
 	xorl %eax,%eax
-	addl $20, %esp
+	addl $20, %esp	/* has to be added now as add does modify cary */
 	stc
-	jmp .Lsde_end2
+	jmp .Lsde_end_afterstack
 
 .Lsde_end:
 	addl $20, %esp
 
-.Lsde_end2:
+.Lsde_end_afterstack:
 	popl %ebp
 	popl %ebx
 	popl %edi
@@ -836,9 +794,7 @@ ext2_search_in_dirnode:
 /* int ext2_walk_dir_entry_nohash(char* buf, char* matchstr)
  *
  * search the directory entry, ignore hash tree if it exists
- *
- * returns:	inode of matched string
- * err: 	0
+ * returns: inode of matched string, 0 otherweise, CF set
  */
 .global ext2_walk_dir_entry_nohash
 .func ext2_walk_dir_entry_nohash
@@ -867,7 +823,6 @@ ext2_walk_dir_entry_nohash:
 
 	movl %eax, %esi				/* esi: buf */
 	movl %edx, %edi				/* edi: matchstr */
-
 	movl %edx, %eax				/* strlen(matchstr) */
 	call strlen16
 	movl %eax, %ebp				/* ebp: matchstr len */
@@ -880,17 +835,8 @@ ext2_walk_dir_entry_nohash:
 
 	/* to avoid infinite loop check the size of the direntry */
 	cmpw $0, DIR_OFST_RECLEN(%esi,%ebx)	/* it can't be 0 */
-	jne .Lsden_mainloop_csizeok
+	je .Lsden_err_direlen
 
-	/* display the error */
-	movw $(ext2_walk_dir_entry_nohasg_err), %ax
-	call puts16
-
-	xorl %eax,%eax
-	stc					/* indicate we have a problem */
-	jmp .Lsden_end
-
-.Lsden_mainloop_csizeok:
 	movzxb 6(%esi,%ebx), %cx		/* dir len */
 
 	cmp %cx, %bp				/* skip the entry if its size is not the same */
@@ -908,6 +854,14 @@ ext2_walk_dir_entry_nohash:
 
 .Lsden_nofound:
 	xorl %eax,%eax
+	jmp .Lsden_end
+
+	/* dirlen of the entry can't be 0 */
+.Lsden_err_direlen:
+	movw $(ext2_walk_dir_entry_nohasg_err), %ax
+	call puts16
+	xorl %eax,%eax
+	stc					/* indicate we have a problem */
 	jmp .Lsden_end
 
 .Lsden_found:
@@ -938,7 +892,6 @@ ext2_walk_dir_entry_nohash:
 /* int ext2_walk_dir_entry_nohash_sibp(char* buf, char* matchstr)
  *
  * search matchstr in single indirect data block
- *
  * returns: inode if OK, 0 otherwise
 */
 .global ext2_walk_dir_entry_nohash_sibp
@@ -1028,7 +981,6 @@ ext2_walk_dir_entry_nohash_sibp:
 /* int ext2_walk_dir_entry_nohash_dibp(char* buf, char* matchstr)
  *
  * search matchstr in single indirect data block
- *
  * returns: inode if OK, 0 otherwise
 */
 .global ext2_walk_dir_entry_nohash_dibp
@@ -1118,7 +1070,6 @@ ext2_walk_dir_entry_nohash_dibp:
 /* int ext2_walk_dir_entry_nohash_tibp(char* buf, char* matchstr)
  *
  * search matchstr in single indirect data block
- *
  * returns: inode if OK, 0 otherwise
 */
 .global ext2_walk_dir_entry_nohash_tibp
@@ -1211,7 +1162,7 @@ ext2_walk_dir_entry_nohash_tibp:
  * Searches for the inode inum. If found inode structure is updated.
  * To cache block access blockbuf is used.
  *
- * returns 0: OK, on error CF is set
+ * returns: 0 if OK, on error CF is set
 */
 .global ext2_access_inode
 .func ext2_access_inode
@@ -1336,7 +1287,7 @@ ext2_access_inode:
  * access blocks group descriptor by its id
  * uses defualt ADDR_READBUF to store its data
  *
- * return 0 if OK
+ * returns: 0 if OK
 */
 .global ext2_access_gde
 .func ext2_access_gde
@@ -1400,9 +1351,7 @@ ext2_access_gde:
 /* char* access_block(unsigned int blockid, char* buf)
  *
  * reads the block of a given blockid into buffer
- *
- * returns address of a block when read is successfull.
- * NULL otherwise
+ * returns: address of a block, NULL otherwise
 */
 .global ext2_access_block
 .func ext2_access_block
@@ -1424,21 +1373,21 @@ ext2_access_block:
 		.endif
 	.endif
 
-	movl (l_ext2_sb_blocks_count), %ecx
+	movl (l_ext2_sb_blocks_count), %ecx			/* check if blockid is in range */
 	cmpl %ecx, %eax
-	ja .Lab_oor					/* block out of range */
+	ja .Lab_err_range
 
 .Lab_doread:
 	/* LBA to seek to: ext2_LBA_start + blkid * block_size_in_sectors */
-	movw %dx, (w_dap_buf)				/* set the appropriate buffer location */
+	movw %dx, (w_dap_buf)					/* set the appropriate buffer location */
 
 	xorl %edx,%edx
-	movzxw (w_ext2_blocksize_in_sectors), %ecx	/* blockid * w_ext2_blocksize_in_sectors */
+	movzxw (w_ext2_blocksize_in_sectors), %ecx		/* blockid * w_ext2_blocksize_in_sectors */
 	mull %ecx
 
-	addl (q_part_lba_start), %eax			/* add the result to the start of the partition */
+	addl (q_part_lba_start), %eax				/* add the result to the start of the partition */
 	movl %eax, (q_dap_start)
-	movw $SECTORS_IN_BUF, (w_dap_sectors)
+	movw $SECTORS_IN_EXT2BUF, (w_dap_sectors)
 
 	.ifdef EXT2_DEBUG_VERBOSE
 		.if EXT2_DEBUG_VERBOSE > 2
@@ -1451,10 +1400,14 @@ ext2_access_block:
 
         leaw (lba_dap), %dx
         movw (w_bp_disk), %ax
-        call diskread16					/* errno16 and ax set in case of an error */
+        call diskread16			/* errno16 and ax set in case of an error */
 	test %ax, %ax
-	jz .Lab_readok
+	jnz .Lab_err_readerr
 
+	movzxw (w_dap_buf), %eax				/* address used for read is still saved in DAP */
+	jmp .Lab_end
+
+.Lab_err_readerr:
 	.ifdef EXT2_DEBUG_VERBOSE
 		pushw %ax
 		pushw $(ext2_access_block_err)
@@ -1462,14 +1415,10 @@ ext2_access_block:
 		addw $4, %sp
 	.endif
 
-	xor %eax, %eax					/* returns NULL in case of error (ax gets lots but errno is set) */
+	xor %eax, %eax						/* returns NULL in case of error (ax gets lots but errno is set) */
 	jmp .Lab_stcend
 
-.Lab_readok:
-	movzxw (w_dap_buf), %eax			/* address used for read is still saved in DAP */
-	jmp .Lab_end
-
-.Lab_oor:
+.Lab_err_range:
 	/* blockid out of range */
 	pushl %ecx
 	pushl %eax
@@ -1479,7 +1428,7 @@ ext2_access_block:
 	xorl %eax,%eax
 
 .Lab_stcend:
-	stc						/* indicate error */
+	stc	/* indicate error */
 .Lab_end:
 	ret
 .endfunc
@@ -1488,8 +1437,7 @@ ext2_access_block:
 /* int8_t ext2_readdisk(int lba, int blocks, char* buf)
  *
  * reads the blocks from lba into buf. buf has to have space to read the data
- *
- * CF indicates error, errno16 is set. Otherwise returns 0.
+ * returns: 0 if OK, CF to indicate error, errno16 set
 */
 .func ext2_readdisk
 ext2_readdisk:
@@ -1513,11 +1461,13 @@ ext2_readdisk:
 	ret
 .endfunc
 
+
+// TODO: doubly/triply indirect search not implemented ! 
+
 /* char* ext2_inode_seek(struct inode, char* buf, int offset)
  *
  * Locate block within inode corresponding to offset, load to buffer.
- *
- * return ptr to location if OK, NULL otherwise
+ * returns: ptr to location if OK, NULL otherwise
  *
 */
 .global ext2_inode_seek
