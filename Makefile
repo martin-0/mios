@@ -44,6 +44,7 @@ copy:
 	sudo mkdir -p $(ROOTFS)/boot
 	sudo cp obj/kernel  $(ROOTFS)/boot/
 	sudo cp obj/*.o $(ROOTFS)
+	sudo cp tests//debugme $(ROOTFS)
 	sudo umount $(ROOTFS)
 	sudo losetup -D
 
