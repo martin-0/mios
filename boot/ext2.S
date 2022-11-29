@@ -1469,7 +1469,7 @@ ext2_readdisk:
 .endfunc
 
 
-// TODO: doubly/triply indirect search not implemented ! 
+// TODO: triply indirect search not implemented yes
 
 /* char* ext2_inode_seek(struct inode, char* buf, int offset)
  *
@@ -1581,10 +1581,6 @@ ext2_inode_seek:
 	movl (%ebx, %eax, 4), %eax
 	testl %eax,%eax						/* can't be 0 */
 	jz .Lis_err_0block
-
-
-	// XXX: -16(%ebp) needs to be prepped
-
 
 	/* eax has data block id, load it */
 	jmp .Lis_data_load					/* continue as if we are doing direct load */
