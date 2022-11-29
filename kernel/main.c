@@ -13,6 +13,8 @@
 
 extern uint64_t ticks;
 
+char verybigbuf[2*1024*1024];
+
 void kernel_main() {
 	printf("welcome to kernel_main\n");
 

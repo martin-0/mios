@@ -6,6 +6,7 @@
 */
 
 .set PAGE_SIZE, 	0x1000
+.set MASK_PALIGN,       (PAGE_SIZE-1)
 .set ADDR_KERNEL_ENTRY, 0x20000
 .set GENERIC_BUFSZ,	0x1000				/* if not stated otherwise all buffers are of this size */
 

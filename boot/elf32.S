@@ -19,13 +19,11 @@
 	.set P_ALIGN,		0x1c
 
 	.set PT_LOAD,		1				/* program header type */
+	.set SZ_PHDR,		0x20				/* size of program header structure */
 
 	.set MASK_MEM_ABOVE1M,	0xFFF00000
 
-	.set PAGE_SIZE,		0x1000				/* XXX: PAGE_SIZE should be defined somewhere else maybe? */
-	.set MASK_PALIGN, 	(PAGE_SIZE-1)
-
-	.set SZ_PHDR,		0x20				/* size of program header structure */
+// TODO:	zero down memory from filesz up to memsz
 
 .include "gboot.inc"
 	

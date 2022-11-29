@@ -276,10 +276,31 @@ _start:
 		addw $4, %sp
 	.endif
 
+	dbg_show_addr ext2_inode_seek
+
 	movl $(boot_partition), %eax			/* initialize ext2 module */
 	call ext2_initmod				/* int16_t ext2_initmod(boot_partition *bp) */
 
-	call dbg_ext2_show_superblock
+
+	movw $(debug666), %ax
+	call ext2_search_file
+	testw %ax,%ax
+	jz .Lb1_err_nokernel
+
+	movl $44905472, %ecx
+	//movl $204800, %ecx		// sibp
+        movl $ADDR_BLOCBUF, %edx
+        movl $ADDR_INODE, %eax
+        call ext2_inode_seek
+
+	pushw %ax
+	pushw $debuuug
+	call printf16
+
+	cli
+	hlt
+	xchgw %cx,%cx
+	debuuug: .asciz	"cookie: %s\r\n"
 
 	movw $(strkernel), %ax
 	call ext2_search_file				/* ext2_search_file("/boot/kernel") */
@@ -596,3 +617,4 @@ panic16:
 		dbgmsg_leftovers_stats:	.asciz	"%d leftovers need %d %d-sectors to read\r\n"
 	.endif
 
+	debug666:	.asciz	"/debugme"	
