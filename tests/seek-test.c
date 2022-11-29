@@ -27,13 +27,13 @@ int main() {
 		if (i == 0) break;
 
 		if (i < 12) {
-			printf("%ld is in direct block\n", i);
+			printf("%ld is in direct block, file offset: 0x%lx\n", i, i*BLOCK_SIZE);
 			continue;
 		}
 		tmp = i-12;
 
 		if ( tmp < BLOCK_ENTRIES ) {
-			printf("%ld is in indirect block, offset %ld\n", i, tmp);
+			printf("%ld is in indirect block, file offset 0x%lx\n", i, i*BLOCK_SIZE);
 			continue;
 		}
 
@@ -47,8 +47,8 @@ int main() {
 			b1 =  tmp >> 8;
 			o1 = tmp & BLOCK_MASK_OFFSET;
 
-			printf("%ld is in DIBP: double: %ld, single: %ld\n", i, block, offset);
-			printf("%ld is in DIBP: double: %ld, single: %ld\n", i, b1, o1);
+			printf("%ld is in DIBP: double: %ld, single: %ld, file offset: 0x%lx\n", i, block, offset, i*BLOCK_SIZE);
+			printf("%ld is in DIBP: double: %ld, single: %ld, file offset: 0x%lx\n", i, b1, o1, i*BLOCK_SIZE);
 			continue;
 
 		}
@@ -70,8 +70,8 @@ int main() {
 			b1 =  ( t >> 8) & BLOCK_MASK_OFFSET;
 			o1 = tmp & BLOCK_MASK_OFFSET;
 			
-			printf("%ld is in TIBP: triple; %ld, double: %ld, single: %ld\n", i, tblock, block, offset);
-			printf("%ld is in TIBP: triple; %ld, double: %ld, single: %ld\n", i, t1, b1, o1);
+			printf("%ld is in TIBP: triple; %ld, double: %ld, single: %ld, file offset: 0x%lx\n", i, tblock, block, offset, i*BLOCK_SIZE);
+			printf("%ld is in TIBP: triple; %ld, double: %ld, single: %ld, file offset: 0x%lx\n", i, t1, b1, o1, i*BLOCK_SIZE);
 
 			continue;
 		}	
