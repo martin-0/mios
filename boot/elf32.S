@@ -247,6 +247,23 @@ elf32_load_file:
 	testl %eax,%eax
 	jz .Llf_inodeseek_err
 
+	/* XXX: keeping it here for now
+		pusha
+			movl -16(%ebp), %edx	// leftovers
+			pushw %dx		// copy by block size
+			pushw %ax		// src offset
+			pushw %ds		// src segment (0)
+			pushw -24(%ebp)		// dst offset
+			pushw -22(%ebp)		// dst segment
+			pushw $d1
+			call printf16
+			addw $12, %sp
+			jmp 1f
+			d1:	.asciz	"dst: %x:%x, src: %x:%x, size: %x\r\n"
+		1:
+		popa
+	*/
+
 	movl -16(%ebp), %edx	/* leftovers */
 	pushw %dx		/* copy by block size  */
 	pushw %ds		/* src segment (0) */

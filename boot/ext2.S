@@ -1353,12 +1353,14 @@ ext2_access_gde:
 
 /* char* access_block(unsigned int blockid, char* buf)
  *
- * reads the block of a given blockid into buffer
+ * Reads the block of a given blockid into buffer.
  * returns: address of a block, NULL otherwise
 */
 .global ext2_access_block
 .func ext2_access_block
 ext2_access_block:
+	pushl %esi
+
 	/* debug hello message */
 	.ifdef EXT2_DEBUG_VERBOSE
 		.if EXT2_DEBUG_VERBOSE > 0
@@ -1380,17 +1382,15 @@ ext2_access_block:
 	cmpl %ecx, %eax
 	ja .Lab_err_range
 
-.Lab_doread:
-	/* LBA to seek to: ext2_LBA_start + blkid * block_size_in_sectors */
-	movw %dx, (w_dap_buf)					/* set the appropriate buffer location */
+	movl %edx, %esi						/* esi: buffer */
 
+	/* LBA to seek to: ext2_LBA_start + blkid * block_size_in_sectors */
 	xorl %edx,%edx
 	movzxw (w_ext2_blocksize_in_sectors), %ecx		/* blockid * w_ext2_blocksize_in_sectors */
 	mull %ecx
 
 	addl (q_part_lba_start), %eax				/* add the result to the start of the partition */
-	movl %eax, (q_dap_start)
-	movw $SECTORS_IN_EXT2BUF, (w_dap_sectors)
+	movl $SECTORS_IN_EXT2BUF, %edx
 
 	.ifdef EXT2_DEBUG_VERBOSE
 		.if EXT2_DEBUG_VERBOSE > 2
@@ -1401,11 +1401,9 @@ ext2_access_block:
 		.endif
 	.endif
 
-        leaw (lba_dap), %dx
-        movw (w_bp_disk), %ax
-        call diskread16			/* errno16 and ax set in case of an error */
-	test %ax, %ax
-	jnz .Lab_err_readerr
+	movl %esi, %ecx						/* data buffer */
+	call ext2_readdisk
+	jc .Lab_err_readerr					/* errno16 set too */
 
 	movzxw (w_dap_buf), %eax				/* address used for read is still saved in DAP */
 	jmp .Lab_end
@@ -1433,39 +1431,11 @@ ext2_access_block:
 .Lab_stcend:
 	stc	/* indicate error */
 .Lab_end:
+	popl %esi
 	ret
 .endfunc
 
 
-/* int8_t ext2_readdisk(int lba, int blocks, char* buf)
- *
- * reads the blocks from lba into buf. buf has to have space to read the data
- * returns: 0 if OK, CF to indicate error, errno16 set
-*/
-.func ext2_readdisk
-ext2_readdisk:
-	movw %cx, (w_dap_buf)
-	movw %dx, (w_dap_sectors)
-	movl %eax, (q_dap_start)
-
-	.ifdef EXT2_DEBUG_VERBOSE
-		.if EXT2_DEBUG_VERBOSE > 2
-			pushw (w_dap_sectors)
-			pushl (q_dap_start)
-			pushw (w_dap_buf)
-			pushw $(dbgmsg_ext2_readdiskstats)
-			call printf16
-			addw $10, %sp
-		.endif
-	.endif
-	leaw (lba_dap), %dx
-	movw (w_bp_disk), %ax
-	call diskread16					/* errno16 and ax set in case of an error */
-	ret
-.endfunc
-
-
-// TODO: triply indirect search not implemented yes
 
 /* char* ext2_inode_seek(struct inode, char* buf, int offset)
  *
@@ -1495,7 +1465,6 @@ ext2_inode_seek:
 	movl %eax, %esi						/* esi: inode */
 	movl %edx, %edi						/* edi: buffer */
 	movl %ecx, -12(%ebp)					/* seek offset */
-
 	testl %ecx, %ecx					/* size can't be 0 */
 	jz .Lis_err_ret
 
@@ -1675,6 +1644,33 @@ ext2_inode_seek:
 	popl %ebx
 	popl %edi
 	popl %esi
+	ret
+.endfunc
+
+/* int8_t ext2_readdisk(int lba, int sectors, char* buf)
+ *
+ * reads the blocks from lba into buf. buf has to have space to read the data
+ * returns: 0 if OK, CF to indicate error, errno16 set
+*/
+.func ext2_readdisk
+ext2_readdisk:
+	movw %cx, (w_dap_buf)
+	movw %dx, (w_dap_sectors)
+	movl %eax, (q_dap_start)
+
+	.ifdef EXT2_DEBUG_VERBOSE
+		.if EXT2_DEBUG_VERBOSE > 2
+			pushw (w_dap_sectors)
+			pushl (q_dap_start)
+			pushw (w_dap_buf)
+			pushw $(dbgmsg_ext2_readdiskstats)
+			call printf16
+			addw $10, %sp
+		.endif
+	.endif
+	leaw (lba_dap), %dx
+	movw (w_bp_disk), %ax
+	call diskread16					/* errno16 and ax set in case of an error */
 	ret
 .endfunc
 
