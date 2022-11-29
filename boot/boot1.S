@@ -3,7 +3,16 @@
 /* NOTE:
 /*	Any address that is used here has to be < 0x10000 as I opted for all segments to be 0.
 	Additional checks should be done. Maybe all these checks can be in linker script.
-	But can linker script check for .bss size too?
+	Linker script will complain if I cross it anyway.
+
+
+	Kernel LOADADDR is set to 0x20000. There are two major limitations that are not addresses yet:
+		- size of the kernel: Qemu's first usable memory region ends @ 9fc00, so kernel bigger than ~511K is a problem.
+				Load addres for data is rounded on PAGE_SIZE so even less is usable.
+
+		- LOADADDR has to be < 1MB if I want to use standard BIOS read. I could opt for int 15/AH=87h to get up to ~16MB limit.
+			This is now in TODO.
+
 */
 
 .include "gboot.inc"
@@ -281,6 +290,26 @@ _start:
 	movl $(boot_partition), %eax			/* initialize ext2 module */
 	call ext2_initmod				/* int16_t ext2_initmod(boot_partition *bp) */
 
+/* XXX: keeping it here for now
+	movw $(debugmefile), %ax
+	call ext2_search_file
+	testw %ax,%ax
+	jz .Lb1_err_nokernel
+
+	movl $0x89400, %ecx
+	movw $ADDR_BLOCBUF, %dx
+	movw $ADDR_INODE, %ax
+	call ext2_inode_seek
+
+	pushw %ax
+	pushw $(cookiestr)
+	call printf16
+
+	jmp .Lb1_haltme
+	debugmefile:	.asciz	"/debugme"
+	cookiestr:	.asciz	"cookie: %s\r\n"
+*/
+
 	movw $(strkernel), %ax
 	call ext2_search_file				/* ext2_search_file("/boot/kernel") */
 	testw %ax,%ax
@@ -394,7 +423,6 @@ search_uuid_buf:
 	ret
 .endfunc
 
-
 /* do_read()
  *
  * wrapper func for diskread16
@@ -421,7 +449,7 @@ do_read:
 
 	leaw (lba_dap), %dx
 	movw (w_bp_bootdrive), %ax
-	call diskread16			/* read16(int16_t disk, struct lba_dap* dap) */
+	call diskread16			/* diskread16(int16_t disk, struct lba_dap* dap) */
 
 	test %ax,%ax
 	jz .Lb1_doread_end
@@ -472,7 +500,6 @@ panic16:
 .endfunc
 
 .section .data
-
 	/* basic information about the boot disk */
 	.align 8
 

@@ -8,11 +8,8 @@ Kernel is being searched in "/boot/kernel". Symlinks are supported. <br /><br />
 elf32 loader loads the PT_LOAD segments of the kernel.
 
 ## TODO
-boot/ext2.S	ext2_inode_seek() : doubly/triply indirect search not implemented yet<br />
+gboot:	create xread that can save read blocks above 1MB limit (int 15/AH=87h).
 kernel/*	need to adjust idt.S to work with regparm=3
-
-## NOTES
-Do a cleanup of the gboot code. Lots of 16/32b assembly mixed together.
 
 ### To run the VM
 ```sh
