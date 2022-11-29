@@ -1,10 +1,11 @@
+/* test: avoid using div when locating correct block in inode's data. */
+
 #include <stdio.h>
 
 #define	BLOCK_SIZE		1024
 
 #define	BLOCK_ENTRIES		( BLOCK_SIZE >> 2)
 #define	BLOCK_MASK		~( (BLOCK_ENTRIES)-1 )
-
 #define	BLOCK_MASK_OFFSET	((BLOCK_ENTRIES)-1)
 
 
