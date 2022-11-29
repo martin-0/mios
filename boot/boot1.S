@@ -281,27 +281,6 @@ _start:
 	movl $(boot_partition), %eax			/* initialize ext2 module */
 	call ext2_initmod				/* int16_t ext2_initmod(boot_partition *bp) */
 
-
-	movw $(debug666), %ax
-	call ext2_search_file
-	testw %ax,%ax
-	jz .Lb1_err_nokernel
-
-	movl $44905472, %ecx
-	//movl $204800, %ecx		// sibp
-        movl $ADDR_BLOCBUF, %edx
-        movl $ADDR_INODE, %eax
-        call ext2_inode_seek
-
-	pushw %ax
-	pushw $debuuug
-	call printf16
-
-	cli
-	hlt
-	xchgw %cx,%cx
-	debuuug: .asciz	"cookie: %s\r\n"
-
 	movw $(strkernel), %ax
 	call ext2_search_file				/* ext2_search_file("/boot/kernel") */
 	testw %ax,%ax
@@ -609,7 +588,7 @@ panic16:
 	.ifdef DEBUG_VERBOSE
 		dbgmsg_verbose:		.asciz	"verbose boot enabled.\r\n"
 		dbgmsg_diskinfo:	.asciz	"bootdisk: 0x%x, sector size: %d, total LBAs: 0x%lx%lx\r\n"
-		dbgmsg_buf_info:	.asciz	"bufsize: %d sectors, %d partitions. rounds: %d, w_leftovers: %d\r\n"
+		dbgmsg_buf_info:	.asciz	"bufsize: %d sectors, %d partitions. rounds: %d, leftovers: %d\r\n"
 		dbgmsg_part_range:	.asciz	"partition range: <%d,%d)\r\n"
 		dbgmsg_doread_stats:	.asciz	"do_read: buf: 0x%x, start lba: 0x%lx%lx, sectors: %d\r\n"
 		dbgmsg_bpart_lba:	.asciz	"boot partition LBA start: 0x%x\r\n"
