@@ -30,13 +30,6 @@
 
 	To handle symlinks I need temporary space to copy data over. During this operation indirect block buffers
 	are free and can be used to move the data around.
-
-
-   XXX: maybe too much 16/32 asm mixing ? We can't address anything above 0xffff without using segment registers.
-	It should be enough, and it is for now, but maybe some sort of checks should be done?
-
-   XXX: make all functions description follow the same layout
-
 */
 
 .include "gboot.inc"
@@ -116,6 +109,7 @@ ext2_initmod:
 	ja .Lim_err_unsupp_blocksize
 
 	movl %eax, (l_ext2_sb_blocksize)		/* save the block size */
+	movl %eax, %ecx					/* ecx;: block size, used below */
 	shrl $2, %eax					/* how many sizeof(int32_t) entries can fit block size */
 	movw %ax, (w_ext2_inode_indirect_ref)
 	movzxw %ax, %edx				/* save it for other calculation */
@@ -135,7 +129,9 @@ ext2_initmod:
 	movl %edx, (l_ext2_inode_block_mask_offset)	/* mask for offset to indirect block pointers */
 	not %edx
 	movl %edx, (l_ext2_inode_block_mask)		/* mask for blocks when calculating block ref pointers */
-	
+
+	bsr %cx, %ax					/* cx: block size exponent */
+	movw %ax, (w_ext2_block_size_exp)		/* 1 << w_ext2_block_size_exp = blocksize */
 
 	// TODO: check ext2 revision if I'm able to read it
 	movl EXT2_SB_OSFT_REV_LEVEL(%si), %eax		/* check the revision version, i.e. major version */
@@ -1485,19 +1481,15 @@ ext2_inode_seek:
 	pushl %ebx
 	pushl %ebp
 	movl %esp, %ebp
-	subl $40, %esp
+	subl $32, %esp
 
-	/* stack variables:
+	/* stack variables with fix use:
 		-4(%ebp)		block index for given offset
 		-8(%ebp)		block offset within block index for given offset
 		-12(%ebp)		seek offset to a file
-
-		// XXX: rename this a bit more
-		-16(%ebp)		data block id: blockid that holds the points to data
-		-20(%ebp)		SIBP block id
-		-24(%ebp)		DIBP block id
-		-28(%ebp)		TIBP block id
-		-32(%ebp)		int32_t tmp (debug only)
+		-16(%ebp)		data block id; index within SIBP
+		-20(%ebp)		index to DIBP
+		-24(%ebp)		index to TIBP
 	*/
 
 	movl %eax, %esi						/* esi: inode */
@@ -1511,17 +1503,21 @@ ext2_inode_seek:
 	cmpl INODE_OFST_ISIZE(%esi), %ecx
 	jae .Lis_err_ret
 
-	/* XXX: we know block size is power of 2, there's place for better optimization than div */
+	/*
+		block_index = file_offset > w_ext2_block_size_exp
+		offset within buffer = file_offset & l_ext2_inode_block_mask_offset
+	*/
 
-	xorl %edx,%edx						/* offset / l_ext2_sb_blocksize = block position */
 	movl %ecx, %eax
-	movl (l_ext2_sb_blocksize), %ecx
-	div %ecx
+	movl %ecx, %edx
+	movw (w_ext2_block_size_exp), %cx
+	andl (l_ext2_inode_block_mask_offset), %edx		/* offset within buffer */
+	shrl %cl, %eax						/* index to blocks */
 
 	movl %eax, -4(%ebp)					/* index within blocks */
 	movl %edx, -8(%ebp)					/* offset within buffer */
 
-	//.ifdef EXT2_DEBUG_VERBOSE
+	.ifdef EXT2_DEBUG_VERBOSE
 		pushw %dx
 		pushl %eax
 		pushl -12(%ebp)
@@ -1529,7 +1525,7 @@ ext2_inode_seek:
 		call printf16
 		addw $12, %sp
 		movl -4(%ebp), %eax
-	//.endif
+	.endif
 
 	cmpl $INODE_DIRECT_BLOCKS, %eax
 	jae .Lis_isit_indirect_single				/* maybe it's singly indirect block */
@@ -1537,9 +1533,6 @@ ext2_inode_seek:
 	/* direct block access */
 	movl INODE_OFST_DBP_0(%esi,%eax,4), %eax		/* load the data block id */
 	movl %eax, -16(%ebp)					/* -16(%ebp): store data block */
-
-	/* eax has data blockid loaded */
-	movl -16(%ebp), %eax
 
 .Lis_data_load:
 	movl %edi, %edx
@@ -1551,21 +1544,12 @@ ext2_inode_seek:
 	/* single indirect block has w_ext2_inode_indirect_ref entries */
 .Lis_isit_indirect_single:
 	subl $INODE_DIRECT_BLOCKS, %eax				/* so we can index within indirect buffers */
-	movl %eax, -32(%ebp)					/* store adjusted blocks into tmp */
 	movzxw (w_ext2_inode_indirect_ref), %edx		/* w_ext2_inode_indirect_ref */
 	cmpl %edx, %eax						/* can we fit this number into SIBP ? */
 	jae .Lis_isit_indirect_double
-
-	movl %eax, -20(%ebp)					/* eax holds the SIBP index */
+	movl %eax, -16(%ebp)					/* index for sibp[idx] */
 
 .Lis_handle_indirect_single:
-	pusha
-	pushl %eax
-	pushw $(dbgs)
-	call printf16
-	addw $6, %sp
-	popa
-
 	movl INODE_OSFT_SIBP(%esi), %eax			/* eax: inode's SIBP block id */
 	testl %eax,%eax						/* assert: this should not happen */
 	jz .Lis_err_0block
@@ -1577,7 +1561,7 @@ ext2_inode_seek:
 
 	/* load the block: sibp[idx] */
 	movl %eax, %ebx						/* sibp buffer */
-	movl -20(%ebp), %eax					/* SIBP index to load */
+	movl -16(%ebp), %eax					/* SIBP index to load */
 	movl (%ebx, %eax, 4), %eax
 	testl %eax,%eax						/* can't be 0 */
 	jz .Lis_err_0block
@@ -1587,13 +1571,12 @@ ext2_inode_seek:
 
 .Lis_isit_indirect_double:
 	subl %edx, %eax						/* edx: w_ext2_inode_indirect_ref */
-	movl %eax, -32(%ebp)					/* store adjusted blocks into tmp */
 	movw (w_ext2_inode_entries_per_block_exp), %cx
 	shll %cl, %edx						/* w_ext2_inode_entries_per_block^2 */
 
 	/* if tmp < w_ext2_inode_entries_per_block^2 -> DIBP */
 	cmpl %edx, %eax
-	jae .Lis_isit_indirect_triple
+	jae .Lis_indirect_triple				/* can't be anythign else */
 
 	movl %eax, %edx
 	movw (w_ext2_inode_entries_per_block_exp), %cx
@@ -1601,30 +1584,22 @@ ext2_inode_seek:
 	movl (l_ext2_inode_block_mask_offset), %ecx
 	andl %ecx, %edx	
 
-	movl %edx, -20(%ebp)					/* SIBP idx */
-	movl %eax, -24(%ebp)					/* DIBP idx */
-	jmp 1f
+	movl %edx, -16(%ebp)					/* idx for sibp[idx] */
+	movl %eax, -20(%ebp)					/* idx2 for dibp[idx2] */
 	
 .Lis_handle_indirect_double:
-	pusha
-	pushl %eax
-	pushw $(dbgd)
-	call printf16
-	addw $6, %sp
-	popa
-
-1:
 	movl INODE_OSFT_DIBP(%esi), %eax			/* eax: inode's DIBP block id */
 	testl %eax,%eax						/* assert: this should not happen */
 	jz .Lis_err_0block
 
+.Lis_indirect_double_load:
 	movl $ADDR_DIBPBUF, %edx				/* edx: use ADDR_DIBPBUF as new block buffer */
 	call ext2_access_block
 	jc .Lis_err_ret
 
 	/* load the block: dibp[idx] */
 	movl %eax, %ebx						/* dibp buffer */
-	movl -24(%ebp), %eax					/* DIBP index to load */
+	movl -20(%ebp), %eax					/* DIBP index to load */
 	movl (%ebx, %eax, 4), %eax
 	testl %eax,%eax						/* can't be 0 */
 	jz .Lis_err_0block
@@ -1632,16 +1607,54 @@ ext2_inode_seek:
 	/* eax has data block id, load it */
 	jmp .Lis_indirect_single_load
 
-.Lis_isit_indirect_triple:
-	shll %cl, %edx
+.Lis_indirect_triple:
+	subl %edx, %eax						/* edx: w_ext2_inode_indirect_ref */
+	shll %cl, %edx						/* cx: w_ext2_inode_entries_per_block_exp */
 	cmpl %edx, %eax
-	jae .Lis_err_sizetoobig					/* sanity check: this should not happen though */
+	jae .Lis_err_sizetoobig					/* max capacity for inode for given block size */
 
-	movw $(notimplemented), %ax
-	call puts16
-	notimplemented:	.asciz	"triple indirect load not yet implemented.\r\n"
-	dbgs:	.asciz	"single indirect entries: %lx\r\n"
-	dbgd:	.asciz	"double indirect entries: %lx\r\n"
+	/* compute all 3 indices:
+		tripple_idx = tmp >> 16  // tmp = eax
+		t = tmp-tripple_idx
+		double_idx = ( t >> 8) & BLOCK_MASK_OFFSET
+		single_idx = tmp & BLOCK_MASK_OFFSET;
+	*/
+
+	/* single index, or data index */
+	movl %eax, %edx						/* edx: tmp val */
+	movl (l_ext2_inode_block_mask_offset), %ebx		/* ebx: l_ext2_inode_block_mask_offset */
+	andl %ebx, %edx
+	movl %edx, -16(%ebp)					/* idx for data done */
+
+	/* tripple index */
+	movl %eax, %edx
+	shrl %cl, %edx						/* fastes way to do twice the size of w_ext2_inode_entries_per_block_exp */
+	shrl %cl, %edx						/* would be to repeat it twice. i still need cx register */
+	movl %edx, -24(%ebp)
+
+	/* double index */
+	subl %edx, %eax
+	shrl %cl, %eax
+	andl %ebx, %eax
+	movl %eax, -20(%ebp)
+
+	movl INODE_OSFT_TIBP(%esi), %eax			/* eax: inode's TIBP block id */
+	testl %eax,%eax						/* assert: this should not happen */
+	jz .Lis_err_0block
+
+	movl $ADDR_TIBPBUF, %edx				/* edx: use ADDR_TIBPBUF as new block buffer */
+	call ext2_access_block
+	jc .Lis_err_ret
+
+	/* load the block: tibp[idx] */
+	movl %eax, %ebx						/* tibp buffer */
+	movl -24(%ebp), %eax					/* TIBP index to load */
+	movl (%ebx, %eax, 4), %eax
+	testl %eax,%eax						/* can't be 0 */
+	jz .Lis_err_0block
+
+	/* eax has data block id, load it */
+	jmp .Lis_indirect_double_load
 
 .Lis_err_sizetoobig:
 	movw $(ext2_inode_seek_err_size), %ax
@@ -1657,7 +1670,7 @@ ext2_inode_seek:
 	xorl %eax,%eax
 
 .Lis_ret:
-	addl $40, %esp
+	addl $32, %esp
 	popl %ebp
 	popl %ebx
 	popl %edi
@@ -1777,8 +1790,9 @@ dbg_ext2_show_gbdt:
 	l_ext2_inode_entries_per_block:		.long 0		/* inodes entries that fit blocksize ( blocksize/int32_t) */
 	w_ext2_inode_indirect_ref:		.word 0		/* amount of indirect pointers that can fit to datablock */
 	w_ext2_inode_size_exp:			.word 0		/* inode size has to be power of 2; save its exponent */
-	l_ext2_inode_block_mask:			.long 0
+	l_ext2_inode_block_mask:		.long 0
 	l_ext2_inode_block_mask_offset:		.long 0
+	w_ext2_block_size_exp:			.word 0		/* exponent 2^x of l_ext2_sb_blocksize */
 	
 
 	/* struct ext2_group_desc */
