@@ -24,16 +24,14 @@ int main() {
 		r = scanf("%lu", &i);
 		if (r == 0 || r == EOF ) break;
 
-		if (i == 0) break;
-
 		if (i < 12) {
-			printf("%ld is in direct block, file offset: 0x%lx\n", i, i*BLOCK_SIZE);
+			printf("%ld is in direct block %ld, file offset: 0x%lx\n", i, i, i*BLOCK_SIZE);
 			continue;
 		}
 		tmp = i-12;
 
 		if ( tmp < BLOCK_ENTRIES ) {
-			printf("%ld is in indirect block, file offset 0x%lx\n", i, i*BLOCK_SIZE);
+			printf("%ld is in SIBP: %ld, file offset 0x%lx\n", i, tmp, i*BLOCK_SIZE);
 			continue;
 		}
 
