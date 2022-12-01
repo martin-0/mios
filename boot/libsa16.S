@@ -3,6 +3,9 @@
 /* ABI: cdecl: args on stack, scratch registers: ax cx dx */
 /* ABI: regparm=3: ax,dx,cx ; variadic function still uses stack */
 
+// XXX: I should maybe get rid of func32 functions. While they operate on 32b regs
+// XXX:	I can't address mem > 0xffff with them.
+
 	.set TABSPACE,	4
 
 .section .text
@@ -1191,14 +1194,12 @@ farmemcpy:
 
 .Lfmpcy_prepb:
 	movw %dx, %cx
-	andw $0xf, %cx			/* byte leftovers */
-	test %cx, %cx
-	jz .Lfmcpy_end
+	test $1, %cx			/* byte leftovers */
+	jnz .Lfmcpy_end
 
-.Lfmcpy_loopb:
+	/* there can be only single byte left with 2B words, no loop needed */
 	lodsb
 	stosb
-	loop .Lfmcpy_loopb
 
 .Lfmcpy_end:
 	xorw %ax,%ax
@@ -1210,6 +1211,91 @@ farmemcpy:
 	popw %bp
 	ret
 .endfunc
+
+/* void pm_copy(char* dst32, char* src32, int32_t size)
+ *
+ * Copy src to dst in protected mode.
+ */
+.global pm_copy
+.func pm_copy
+pm_copy:
+	cli
+	pushaw					/* -0x10 to stack */
+	pushw %bp
+	movw %sp, %bp
+	andw $0xff00, %sp
+
+	lgdt (sa_gdt_desc)
+	movl %cr0, %eax
+	orl $1, %eax
+	movl %eax, %cr0
+	jmp $8, $.Lpc_pmentry
+
+.Lpc_pmentry:
+	.code32
+	movw $0x10, %ax
+	movw %ax, %ds
+	movw %ax, %es
+	movw %ax, %ss
+
+	movl 0x1c(%ebp), %ecx
+	movl 0x18(%ebp), %esi
+	movl 0x14(%ebp), %edi
+
+	testl %ecx, %ecx			/* nothing to copy, back to RM */
+	jz .Lpc_rmprep
+
+	movl %ecx,%edx				/* save if needed later */
+	shrl $2, %ecx				/* 4B words to copy */
+
+	testl %ecx,%ecx
+	jz .Lpc_copyrest
+
+.Lpc_loop:					/* main copy loop */
+	lodsl
+	stosl
+	loop .Lpc_loop
+
+	movl %edx, %ecx
+	andl $3, %ecx
+	testl %ecx, %ecx
+	jz .Lpc_rmprep
+
+.Lpc_copyrest:
+	lodsb
+	stosb
+	loop .Lpc_copyrest
+
+.Lpc_rmprep:
+	xorl %edi,%edi
+	xorl %esi,%esi
+	jmp $0x18, $1f
+1:
+	.code16
+	movw $0x20, %ax
+	movw %ax, %ds
+	movw %ax, %ss
+	movw %ax, %es
+
+	movl %cr0, %eax				/* prepare to jump to RM again */
+	dec %eax
+	movl %eax, %cr0
+
+	jmp $0, $.Lpc_rmentry
+
+.Lpc_rmentry:
+	xorl %eax, %eax				/* no return code; 0 eax anyway */
+	movw %ax, %es
+	movw %ax, %ds
+	movw %ax, %ss
+
+	movw %bp, %sp
+	popw %bp
+	popaw
+	sti
+	retw
+.endfunc
+
 
 /* Functions that use 32b registers. */
 
@@ -1402,6 +1488,52 @@ strtok32_r:
 .section .data
 	.align 2
 	__strtok_nextptr:		.word	0	/* used for internal tracking of str with strtok16() */
+
+	/* GDT used during PM copy */
+	.align 8
+	sa_gdt_desc:	.word sa_gdt_end-sa_gdt-1		/* size */
+			.word sa_gdt, 0				/* linear address, ptr to gdt */
+	.align 8
+	sa_gdt:
+		/* base:	32b value, linear address where the segment begins
+		 * limit:	20b value, maximum addressable unit, either 1B units or 4k pages
+		 * access:	description of segment: P | DPL  | S | E | DC | RW | A
+		 * flags:	granularity, db (size flag, 1B or 4k pages), long mode flag, reserved (0)
+		 */
+		.space	8		/* NULL desc */
+
+		/* %cs in PM mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
+		.byte 0xcf		/* RTL: flags-limit 16-19: , flags: 32b protected mode segment, page granularity */
+		.byte 0			/* base 24-31 */
+
+		/* data in PM mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
+		.byte 0xcf		/* RTL: flags-limit 16-19: , flags: 32b protected mode segment, page granularity */
+		.byte 0			/* base 24-31 */
+
+		/* %cs in real mode */
+		.word 0xffff		/* limit bits 0-15 */
+		.word 0			/* base 0-15 */
+		.byte 0x0		/* base 16-23 */
+		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
+		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
+		.byte 0			/* base 24-31 */
+
+                /* data in real mode */
+                .word 0xffff            /* limit bits 0-15 */
+                .word 0                 /* base 0-15 */
+                .byte 0x0               /* base 16-23 */
+                .byte 0x92              /* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
+                .byte 0xf               /* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
+                .byte 0                 /* base 24-31 */
+	sa_gdt_end:
 
 	/* dump without tabs */
 	dbg_regs_notabs:

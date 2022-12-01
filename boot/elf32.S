@@ -50,10 +50,7 @@ elf32_load_file:
 		-8(%ebp)	NOTE: unused, was P_OFFSET: offset within block itself
 		-12(%ebp)	P_FILESZ: blocks to read
 		-16(%ebp)	P_FILESZ: size leftover, requires additional block to read
-		-20(%ebp)	current paddr
-		-22(%ebp)	int16: current segment used during program header copy
-		-24(%ebp)	int16: current offset used during program header copy
-		-28(%ebp)	offset within file when loading segments
+		-20(%ebp)	copy dst address
 	*/
 
 	movl %eax, %esi						/* inode */
@@ -123,12 +120,6 @@ elf32_load_file:
 	cmpl $PT_LOAD, P_TYPE(%edi)
 	jne .Llf_progheaders_loop_1
 
-	/* address has to be below 1MB */
-	movl P_PADDR(%edi), %eax
-	andl $MASK_MEM_ABOVE1M, %eax
-	test %eax,%eax
-	jnz .Llf_err_loadaddr_toohigh
-
 	/* has to be page aligned too */
 	movl P_PADDR(%edi), %eax
 	andl $MASK_PALIGN, %eax
@@ -146,22 +137,28 @@ elf32_load_file:
 					can be probably ignored during loading
 	*/
 
-	/* XXX: probably avoid using div but rather mask and check */
 
-	xorl %edx,%edx						/* P_OFFSET: calculate block index within inode's blocks and its offset within buffer */
+	/* NOTE:
+		It's assumed that offset will be aligned but even if it's not it should not be a problem to copy it with pm_copy().
+		This was more problematic for farmemcpy where having it aligned simplified things.
+
+		I'll keep this check for now..
+	*/
+
+	/* P_OFFSET: check the alignment against blocksize */
 	movl P_OFFSET(%edi), %eax
-	movl (l_ext2_sb_blocksize), %ecx
-	div %ecx
-
-	/* Linker script aligned all segments to page size which implies block size. Reject loading unaligned segments. */
-	testl %edx, %edx
+	andl (l_ext2_inode_block_mask_offset), %eax
+	testl %eax, %eax
 	jnz .Llf_err_unsupp_offset
 
 	/* P_FILESZ: calculate blocks to read and leftovers in bytes */
-	xorl %edx,%edx
 	movl P_FILESZ(%edi), %eax
-	movl (l_ext2_sb_blocksize), %ecx
-	div %ecx
+	movl %eax, %edx
+	movw (w_ext2_block_size_exp), %cx
+	andl (l_ext2_inode_block_mask_offset), %edx
+	shrl %cl, %eax						/* blocks to read */
+	movl (l_ext2_sb_blocksize), %ecx			/* leftover within block */
+
 	movl %eax, -12(%ebp)					/* P_FILESZ: blocks to read */
 	movl %edx, -16(%ebp)					/* P_FILESZ: size leftover, requires additional block to read */
 
@@ -173,32 +170,17 @@ elf32_load_file:
 		addw $10, %sp
 	.endif
 
-	/* P_PADDR: page aligned, below 1MB: linear_addr >> 4 gives us required segment */
-	movw $0, -24(%ebp)					/* reset dst offset to 0 */
 	movl P_PADDR(%edi), %eax
-	movb %al, -24(%ebp)					/* dst offset */
-	shr $4, %eax
-	movw %ax, -22(%ebp)					/* dst segment */
-
-	.ifdef DEBUG_VERBOSE
-		pushw %ax
-		pushw $(elf32_lf_dbg3)
-		call printf16
-		addw $4, %sp
-	.endif
+	movl %eax, -20(%ebp)					/* dst address */
 
 	/*
 		laod is done in 2 stages:
 			.Llf_load_blocks			read -12(%ebp) blocks
 			.Llf_load_leftover_block		if P_FILESZ doesn't fit the blocksize completely
-
-		Segment:offset needs to be properly adjusted during block copy.
 	*/
 
-	movl P_PADDR(%edi), %eax
-	movl %eax, -20(%ebp)					/* current paddr */
 	movl P_OFFSET(%edi), %eax
-	movl %eax, -28(%ebp)					/* starting offset within file */
+	movl %eax, -24(%ebp)					/* starting offset within file */
 
 .Llf_load_blocks:
 	/* load the region by blocksize, -12(%ebp) times */
@@ -206,7 +188,7 @@ elf32_load_file:
 	testl %eax, %eax
 	jz .Llf_load_leftover_block
 
-	movl -28(%ebp), %ecx					/* current offset within file */
+	movl -24(%ebp), %ecx					/* current offset within file */
 	movl $ADDR_BLOCBUF, %edx
 	movl $ADDR_INODE, %eax
 	call ext2_inode_seek
@@ -214,64 +196,36 @@ elf32_load_file:
 	jz .Llf_inodeseek_err
 
 	movl (l_ext2_sb_blocksize), %edx
-	pushw %dx		/* copy by block size  */
-	pushw %ds		/* src segment (0) */
-	pushw %ax		/* src offset */
-	pushw -22(%ebp)		/* dst segment */
-	pushw -24(%ebp)		/* dst offset */
-	call farmemcpy
-	add $10, %sp
+	pushl %edx		// size
+	pushl %eax		// src
+	pushl -20(%ebp)		// dst
+	call pm_copy
+	addl $12, %esp
 
 	decl -12(%ebp)						/* blocks_to_read-- */
 	movl (l_ext2_sb_blocksize), %eax
-	addl %eax, -28(%ebp)					/* adjust offset within file */
-
-
-	addw %ax, -24(%ebp)					/* adjust dst offset */
-	jnc .Llf_load_blocks					/* was there overflow? if so adjust segment */
-
-	addw $0x1000, -22(%ebp)					/* adjust segment register */
-	jnc .Llf_load_blocks					/* unlikely but check for it */
-
-	jmp .Llf_err_segment_overflow				/* handle overflow error */
+	addl %eax, -24(%ebp)					/* adjust offset within file */
+	addl %eax, -20(%ebp)
+	jmp .Llf_load_blocks
 
 .Llf_load_leftover_block:
 	movl -16(%ebp), %eax
 	testl %eax, %eax
 	jz .Llf_progheaders_loop_1
 
-	movl -28(%ebp), %ecx					/* current offset within file */
+	movl -24(%ebp), %ecx					/* current offset within file */
 	movl $ADDR_BLOCBUF, %edx
 	movl $ADDR_INODE, %eax
 	call ext2_inode_seek
 	testl %eax,%eax
 	jz .Llf_inodeseek_err
 
-	/* XXX: keeping it here for now
-		pusha
-			movl -16(%ebp), %edx	// leftovers
-			pushw %dx		// copy by block size
-			pushw %ax		// src offset
-			pushw %ds		// src segment (0)
-			pushw -24(%ebp)		// dst offset
-			pushw -22(%ebp)		// dst segment
-			pushw $d1
-			call printf16
-			addw $12, %sp
-			jmp 1f
-			d1:	.asciz	"dst: %x:%x, src: %x:%x, size: %x\r\n"
-		1:
-		popa
-	*/
-
-	movl -16(%ebp), %edx	/* leftovers */
-	pushw %dx		/* copy by block size  */
-	pushw %ds		/* src segment (0) */
-	pushw %ax		/* src offset */
-	pushw -22(%ebp)		/* dst segment */
-	pushw -24(%ebp)		/* dst offset */
-	call farmemcpy
-	add $10, %sp
+	movl -16(%ebp), %edx
+	pushl %edx		// size
+	pushl %eax		// src
+	pushl  -20(%ebp)	// dst
+	call pm_copy
+	addl $12, %esp
 
 	movl P_FILESZ(%edi), %eax
 	movl P_MEMSZ(%edi), %edx
@@ -281,7 +235,7 @@ elf32_load_file:
 
 	/* dst offsets needs to be adjusted as I should 0 down the memory up to P_MEMSZ */
 	movl -16(%ebp), %eax
-	addw %ax, -24(%ebp)					/* adjust dst offset */
+	addl %eax, -20(%ebp)					/* adjust dst offset */
 
 	// TODO: create farmemset(dst, c, size)
 
@@ -313,12 +267,6 @@ elf32_load_file:
 	call puts16
 	jmp .Llf_err_end
 
-	/* handle error during segment adjustment */
-.Llf_err_segment_overflow:
-	movw $(elf32_load_file_err_segmentoverflow), %ax
-	call puts16
-	jmp .Llf_err_end
-
 	/* unlikely event of program headers being away from ELF header of more than blocksize */
 .Llf_err_phdr_toodeep:
 	pushl (l_ext2_sb_blocksize)
@@ -335,14 +283,6 @@ elf32_load_file:
 	call printf16
 	addw $6, %sp
 	jmp .Llf_err_end
-
-	/* we need to load the segment below <1MB as we are using "flat" model even in realmode */
-.Llf_err_loadaddr_toohigh:
-	pushl P_PADDR(%edi)
-	pushw $(elf32_load_file_err_laddr_high)
-	call printf16
-	addw $6, %sp
-	// fall through
 
 .Llf_err_end:
 	movw $1, %ax
@@ -448,7 +388,6 @@ elf32_check_header:
 	w_e_phnum:	.word	0	/* number of entries in the program header table */
 	w_e_shstrndx:	.word	0	/* index to secrion header with section names */ // XXX: ? but then I need sections to be loaded too..
 
-
 	/* elf32_check_header() */
 	elf32_check_header_badsig:	.asciz	"ELF32: bad signature\r\n"
 	elf32_check_header_badclass:	.asciz	"ELF32: only 32B kernel image is supported.\r\n"
@@ -457,11 +396,9 @@ elf32_check_header:
 
 	/* elf32_load_file() */
 	elf32_load_file_msg1:			.asciz	"Loading kernel\r\n"
-	elf32_load_file_err_laddr_high:		.asciz	"ELF32: address 0x%lx above 1MB limit, unable to load.\r\n"
 	elf32_load_file_err_laddr_notaligned:	.asciz	"ELF32: address 0x%lx not PAGE aligned, unable to load.\r\n"
 	elf32_load_file_err_phdr_too_deep:	.asciz	"ELF32: e_phoff (0x%lx) >= blocksize (0x%lx)\r\n"
 	elf32_load_file_err_inodeseek:		.asciz	"ELF32: error in inode seek.\r\n"
-	elf32_load_file_err_segmentoverflow:	.asciz	"ELF32: segment register overflow.\r\n"
 	elf32_load_file_err_unaligned_ofst:	.ascii	"ELF32: unaligned file offset to a segment.\r\n"
 						.ascii	"Offset\t\tPhysAddr\tFileSiz\t\tMemSiz\r\n"
 						.asciz	"0x%lx\t\t0x%lx\t\t0x%lx\t\t0x%lx\r\n"
@@ -472,5 +409,4 @@ elf32_check_header:
 		elf32_lf_info:	.asciz	"elf32_load_file: file size: 0x%lx bytes, spread on %d %d-byte blocks\r\n"
 		elf32_lf_dbg1:	.asciz	"phdr: type: 0x%lx, offset: 0x%lx, paddr: 0x%lx, filesize: 0x%lx\r\n"
 		elf32_lf_dbg2:	.asciz	"P_FILESZ: 0x%lx/0x%lx (blocks/leftovers)\r\n"
-		elf32_lf_dbg3:	.asciz	"dst segment: 0x%x\r\n"
 	.endif
