@@ -11,6 +11,9 @@ elf32 loader loads the PT_LOAD segments of the kernel.
 gboot:	create xread that can save read blocks above 1MB limit (int 15/AH=87h).
 kernel/*	need to adjust idt.S to work with regparm=3
 
+## NOTE
+can boot1.S just reuse the libsa16's GDT ? it's the same anyway ..
+
 ### To run the VM
 ```sh
 make disk
