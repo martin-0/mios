@@ -1786,6 +1786,9 @@ dbg_ext2_show_gbdt:
 	l_ext2_inode_entries_per_block:		.long 0		/* inodes entries that fit blocksize ( blocksize/int32_t) */
 	w_ext2_inode_indirect_ref:		.word 0		/* amount of indirect pointers that can fit to datablock */
 	w_ext2_inode_size_exp:			.word 0		/* inode size has to be power of 2; save its exponent */
+
+	/* used in elf32 module */
+	.global l_ext2_inode_block_mask, l_ext2_inode_block_mask_offset, w_ext2_block_size_exp
 	l_ext2_inode_block_mask:		.long 0
 	l_ext2_inode_block_mask_offset:		.long 0
 	w_ext2_block_size_exp:			.word 0		/* exponent 2^x of l_ext2_sb_blocksize */
