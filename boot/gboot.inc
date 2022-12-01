@@ -7,9 +7,11 @@
 
 .set PAGE_SIZE, 	0x1000
 .set MASK_PALIGN,       (PAGE_SIZE-1)
-.set ADDR_KERNEL_ENTRY, 0x20000
-.set GENERIC_BUFSZ,	0x1000				/* if not stated otherwise all buffers are of this size */
 
+//.set ADDR_KERNEL_ENTRY, 0x20000
+.set ADDR_KERNEL_ENTRY, 0x100000
+
+.set GENERIC_BUFSZ,	0x1000				/* if not stated otherwise all buffers are of this size */
 .set BOOT1_STACK_SP,	0x1ffc
 
 /* GPT */

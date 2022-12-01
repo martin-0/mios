@@ -543,7 +543,6 @@ panic16:
 	w_rounds:			.word 0		/* how many full passes i can make when reading partitions */
 	w_leftovers:			.word 0		/* leftover partitons to read */
 
-
 	/* GDT table definiion */
 	.align 16
 	gdt_desc:	.word end_gdt-gdt-1			/* size */
