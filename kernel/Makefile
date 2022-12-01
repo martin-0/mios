@@ -9,7 +9,8 @@ LD=/local/cross/bin/i686-elf-ld
 INCDIR=../include
 OBJDIR=../obj
 
-LINKADDR=0x20000
+#LINKADDR=0x20000
+LINKADDR=0x100000
 
 ASFLAGS=
 #ASFLAGS=--defsym LINKADDR=$(LINKADDR)
