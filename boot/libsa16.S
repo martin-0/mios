@@ -1236,7 +1236,6 @@ pm_copy:
 	movw $0x10, %ax
 	movw %ax, %ds
 	movw %ax, %es
-	movw %ax, %ss
 
 	movl 0x1c(%ebp), %ecx
 	movl 0x18(%ebp), %esi
@@ -1278,7 +1277,6 @@ pm_copy:
 	.code16
 	movw $0x20, %ax
 	movw %ax, %ds
-	movw %ax, %ss
 	movw %ax, %es
 
 	movl %cr0, %eax				/* prepare to jump to RM again */
@@ -1289,9 +1287,8 @@ pm_copy:
 
 .Lpc_rmentry:
 	xorl %eax, %eax				/* no return code; 0 eax anyway */
-	movw %ax, %es
 	movw %ax, %ds
-	movw %ax, %ss
+	movw %ax, %es
 
 	movw %bp, %sp
 	popw %bp
