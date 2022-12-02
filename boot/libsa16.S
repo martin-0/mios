@@ -1262,9 +1262,13 @@ pm_copy:
 	jz .Lpc_rmprep
 
 .Lpc_copyrest:
+	movl %edx, %ecx
+	andl $3, %ecx				/* mask for 4B word */
+
+.Lpc_miniloop:
 	lodsb
 	stosb
-	loop .Lpc_copyrest
+	loop .Lpc_miniloop
 
 .Lpc_rmprep:
 	xorl %edi,%edi
