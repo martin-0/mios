@@ -2,7 +2,8 @@
 
 #include <stdio.h>
 
-#define	BLOCK_SIZE		1024
+#define	BLOCK_SIZE		2048
+#define	BLOCK_SIZE_MASK		~(BLOCK_SIZE-1)
 
 #define	BLOCK_ENTRIES		( BLOCK_SIZE >> 2)
 #define	BLOCK_MASK		~( (BLOCK_ENTRIES)-1 )
@@ -14,7 +15,7 @@ int main() {
 	unsigned long int i, tmp;
 	unsigned long int tblock, block, offset, t1,b1, o1;
 
-	printf("block size: 0x%x, mask: %x\n", BLOCK_ENTRIES, BLOCK_MASK);
+	printf("block size: 0x%x, mask: %x\n", BLOCK_ENTRIES, BLOCK_SIZE_MASK);
 
 	i =0;
 	while(1) { 
