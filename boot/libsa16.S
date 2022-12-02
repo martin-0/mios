@@ -1220,7 +1220,8 @@ farmemcpy:
 .func pm_copy
 pm_copy:
 	cli
-	pushaw					/* -0x10 to stack */
+	pushl %esi
+	pushl %edi
 	pushw %bp
 	movw %sp, %bp
 	andw $0xfff0, %sp
@@ -1237,9 +1238,9 @@ pm_copy:
 	movw %ax, %ds
 	movw %ax, %es
 
-	movl 0x1c(%ebp), %ecx
-	movl 0x18(%ebp), %esi
-	movl 0x14(%ebp), %edi
+	movl 0x14(%ebp), %ecx
+	movl 0x10(%ebp), %esi
+	movl 0xc(%ebp), %edi
 
 	testl %ecx, %ecx			/* nothing to copy, back to RM */
 	jz .Lpc_rmprep
@@ -1270,8 +1271,6 @@ pm_copy:
 	loop .Lpc_miniloop
 
 .Lpc_rmprep:
-	xorl %edi,%edi
-	xorl %esi,%esi
 	jmp $0x18, $1f
 1:
 	.code16
@@ -1292,7 +1291,8 @@ pm_copy:
 
 	movw %bp, %sp
 	popw %bp
-	popaw
+	popl %edi
+	popl %esi
 	sti
 	retw
 .endfunc
