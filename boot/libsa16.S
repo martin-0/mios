@@ -1223,7 +1223,7 @@ pm_copy:
 	pushaw					/* -0x10 to stack */
 	pushw %bp
 	movw %sp, %bp
-	andw $0xff00, %sp
+	andw $0xfff0, %sp
 
 	lgdt (sa_gdt_desc)
 	movl %cr0, %eax
