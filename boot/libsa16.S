@@ -1274,21 +1274,16 @@ pm_copy:
 	jmp $0x18, $1f
 1:
 	.code16
-	movw $0x20, %ax
+	xorl %eax,%eax
 	movw %ax, %ds
 	movw %ax, %es
 
 	movl %cr0, %eax				/* prepare to jump to RM again */
 	dec %eax
 	movl %eax, %cr0
-
 	jmp $0, $.Lpc_rmentry
 
 .Lpc_rmentry:
-	xorl %eax, %eax				/* no return code; 0 eax anyway */
-	movw %ax, %ds
-	movw %ax, %es
-
 	movw %bp, %sp
 	popw %bp
 	popl %edi
