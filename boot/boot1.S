@@ -285,18 +285,17 @@ _start:
 		addw $4, %sp
 	.endif
 
-	dbg_show_addr ext2_inode_seek
-
 	movl $(boot_partition), %eax			/* initialize ext2 module */
 	call ext2_initmod				/* int16_t ext2_initmod(boot_partition *bp) */
 
-/* XXX: keeping it here for now
+/*
+// XXX: keeping it here for now
 	movw $(debugmefile), %ax
 	call ext2_search_file
 	testw %ax,%ax
 	jz .Lb1_err_nokernel
 
-	movl $0x89400, %ecx
+	movl $0x16BF8, %ecx
 	movw $ADDR_BLOCBUF, %dx
 	movw $ADDR_INODE, %ax
 	call ext2_inode_seek
@@ -308,6 +307,7 @@ _start:
 	jmp .Lb1_haltme
 	debugmefile:	.asciz	"/debugme"
 	cookiestr:	.asciz	"cookie: %s\r\n"
+	//____________________________________________
 */
 
 	movw $(strkernel), %ax
