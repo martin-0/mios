@@ -109,7 +109,11 @@ ext2_initmod:
 	ja .Lim_err_unsupp_blocksize
 
 	movl %eax, (l_ext2_sb_blocksize)		/* save the block size */
-	movl %eax, %ecx					/* ecx;: block size, used below */
+	movl %eax, %ecx					/* ecx: block size, used below */
+	movl %eax, %edx					/* edx: block size, used now, keep eax untouched */
+	dec %edx
+	movw %dx, (w_ext2_blocksize_offset_mask)	/* offset to a blocksize buffer, used in seek */
+
 	shrl $2, %eax					/* how many sizeof(int32_t) entries can fit block size */
 	movw %ax, (w_ext2_inode_indirect_ref)
 	movzxw %ax, %edx				/* save it for other calculation */
@@ -126,12 +130,13 @@ ext2_initmod:
 	movw %ax,(w_ext2_inode_entries_per_block_exp)
 
 	dec %edx					/* w_ext2_inode_indirect_ref - 1*/
-	movl %edx, (l_ext2_inode_block_mask_offset)	/* mask for offset to indirect block pointers */
+	movl %edx, (l_ext2_inode_blocks_mask_offset)	/* mask for offset to indirect block pointers */
 	not %edx
-	movl %edx, (l_ext2_inode_block_mask)		/* mask for blocks when calculating block ref pointers */
+	movl %edx, (l_ext2_inode_blocks_mask)		/* mask for blocks when calculating block ref pointers */
 
 	bsr %cx, %ax					/* cx: block size exponent */
 	movw %ax, (w_ext2_block_size_exp)		/* 1 << w_ext2_block_size_exp = blocksize */
+
 
 	// TODO: check ext2 revision if I'm able to read it
 	movl EXT2_SB_OSFT_REV_LEVEL(%si), %eax		/* check the revision version, i.e. major version */
@@ -1474,14 +1479,16 @@ ext2_inode_seek:
 
 	/*
 		block_index = file_offset > w_ext2_block_size_exp
-		offset within buffer = file_offset & l_ext2_inode_block_mask_offset
+		offset within buffer = file_offset & l_ext2_inode_blocks_mask_offset
 	*/
 
 	movl %ecx, %eax
 	movl %ecx, %edx
 	movw (w_ext2_block_size_exp), %cx
-	andl (l_ext2_inode_block_mask_offset), %edx		/* offset within buffer */
 	shrl %cl, %eax						/* index to blocks */
+
+	movzxw (w_ext2_blocksize_offset_mask), %ecx
+	andl %ecx, %edx
 
 	movl %eax, -4(%ebp)					/* index within blocks */
 	movl %edx, -8(%ebp)					/* offset within buffer */
@@ -1550,7 +1557,7 @@ ext2_inode_seek:
 	movl %eax, %edx
 	movw (w_ext2_inode_entries_per_block_exp), %cx
 	shrl %cl, %eax
-	movl (l_ext2_inode_block_mask_offset), %ecx
+	movl (l_ext2_inode_blocks_mask_offset), %ecx
 	andl %ecx, %edx	
 
 	movl %edx, -16(%ebp)					/* idx for sibp[idx] */
@@ -1591,7 +1598,7 @@ ext2_inode_seek:
 
 	/* single index, or data index */
 	movl %eax, %edx						/* edx: tmp val */
-	movl (l_ext2_inode_block_mask_offset), %ebx		/* ebx: l_ext2_inode_block_mask_offset */
+	movl (l_ext2_inode_blocks_mask_offset), %ebx		/* ebx: l_ext2_inode_blocks_mask_offset */
 	andl %ebx, %edx
 	movl %edx, -16(%ebp)					/* idx for data done */
 
@@ -1788,10 +1795,11 @@ dbg_ext2_show_gbdt:
 	w_ext2_inode_size_exp:			.word 0		/* inode size has to be power of 2; save its exponent */
 
 	/* used in elf32 module */
-	.global l_ext2_inode_block_mask, l_ext2_inode_block_mask_offset, w_ext2_block_size_exp
-	l_ext2_inode_block_mask:		.long 0
-	l_ext2_inode_block_mask_offset:		.long 0
+	.global l_ext2_inode_blocks_mask, l_ext2_inode_blocks_mask_offset, w_ext2_block_size_exp, w_ext2_blocksize_offset_mask
+	l_ext2_inode_blocks_mask:		.long 0
+	l_ext2_inode_blocks_mask_offset:	.long 0
 	w_ext2_block_size_exp:			.word 0		/* exponent 2^x of l_ext2_sb_blocksize */
+	w_ext2_blocksize_offset_mask:		.word 0		/* used when calculating offset leftovers for given blocksize and file offset */
 	
 
 	/* struct ext2_group_desc */

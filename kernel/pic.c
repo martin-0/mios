@@ -246,7 +246,6 @@ void init_idt() {
 		trap_handlers[i] = debug_dump_trapframe;
 	}
 
-
 	ofst = 0;
 	for (i = 0x20; i < 0x30; i++) {
 		setup_idt_entry(irq_main_handler+ofst, KERN_CS, i, IDT_GATE32_IRQ);
