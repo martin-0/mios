@@ -145,19 +145,15 @@ elf32_load_file:
 		I'll keep this check for now..
 	*/
 
-	/* P_OFFSET: check the alignment against blocksize */
-	movl P_OFFSET(%edi), %eax
-	andl (l_ext2_inode_block_mask_offset), %eax
-	testl %eax, %eax
-	jnz .Llf_err_unsupp_offset
+	/* NOTE: P_OFFSET: no checks for alignment as I'm using pm_copy() */
 
 	/* P_FILESZ: calculate blocks to read and leftovers in bytes */
 	movl P_FILESZ(%edi), %eax
 	movl %eax, %edx
 	movw (w_ext2_block_size_exp), %cx
-	andl (l_ext2_inode_block_mask_offset), %edx
 	shrl %cl, %eax						/* blocks to read */
-	movl (l_ext2_sb_blocksize), %ecx			/* leftover within block */
+	movzxw (w_ext2_blocksize_offset_mask), %ecx
+	andl %ecx, %edx						/* additional bytes to read */
 
 	movl %eax, -12(%ebp)					/* P_FILESZ: blocks to read */
 	movl %edx, -16(%ebp)					/* P_FILESZ: size leftover, requires additional block to read */
@@ -249,17 +245,6 @@ elf32_load_file:
 .Llf_progheaders_loop_end:
 	xorl %eax, %eax
 	jmp .Llf_end
-
-	/* offset to a program segment is not page size/block size aligned */
-.Llf_err_unsupp_offset:
-	pushl P_MEMSZ(%edi)
-	pushl P_FILESZ(%edi)
-	pushl P_PADDR(%edi)
-	pushl P_OFFSET(%edi)
-	pushw $(elf32_load_file_err_unaligned_ofst)
-	call printf16
-	addw $16, %sp
-	jmp .Llf_err_end
 
 	/* generic error in seek */
 .Llf_inodeseek_err:
@@ -399,8 +384,7 @@ elf32_check_header:
 	elf32_load_file_err_laddr_notaligned:	.asciz	"ELF32: address 0x%lx not PAGE aligned, unable to load.\r\n"
 	elf32_load_file_err_phdr_too_deep:	.asciz	"ELF32: e_phoff (0x%lx) >= blocksize (0x%lx)\r\n"
 	elf32_load_file_err_inodeseek:		.asciz	"ELF32: error in inode seek.\r\n"
-	elf32_load_file_err_unaligned_ofst:	.ascii	"ELF32: unaligned file offset to a segment.\r\n"
-						.ascii	"Offset\t\tPhysAddr\tFileSiz\t\tMemSiz\r\n"
+	elf32_load_file_msg_phdr:		.ascii	"Offset\t\tPhysAddr\tFileSiz\t\tMemSiz\r\n"
 						.asciz	"0x%lx\t\t0x%lx\t\t0x%lx\t\t0x%lx\r\n"
 
 
@@ -408,5 +392,5 @@ elf32_check_header:
 		elf32_ch_info:	.asciz	"program header entries: %d, starting at 0x%x, entry: 0x%x\r\n"
 		elf32_lf_info:	.asciz	"elf32_load_file: file size: 0x%lx bytes, spread on %d %d-byte blocks\r\n"
 		elf32_lf_dbg1:	.asciz	"phdr: type: 0x%lx, offset: 0x%lx, paddr: 0x%lx, filesize: 0x%lx\r\n"
-		elf32_lf_dbg2:	.asciz	"P_FILESZ: 0x%lx/0x%lx (blocks/leftovers)\r\n"
+		elf32_lf_dbg2:	.asciz	"blocks: 0x%lx, bytes in leftover block: 0x%lx\r\n"
 	.endif
