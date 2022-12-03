@@ -1224,7 +1224,6 @@ pm_copy:
 	pushl %edi
 	pushw %bp
 	movw %sp, %bp
-	andw $0xfff0, %sp
 
 	lgdt (sa_gdt_desc)
 	movl %cr0, %eax
@@ -1240,8 +1239,6 @@ pm_copy:
 	movl 0x14(%ebp), %ecx
 	movl 0x10(%ebp), %esi
 	movl 0xc(%ebp), %edi
-
-	hlt
 	
 	testl %ecx, %ecx			/* nothing to copy, back to RM */
 	jz .Lpc_rmprep
@@ -1252,11 +1249,7 @@ pm_copy:
 	testl %ecx,%ecx
 	jz .Lpc_copyrest
 
-.Lpc_loop:					/* main copy loop */
-	lodsl
-	stosl
-	hlt
-	loop .Lpc_loop
+	rep movsd (%esi),(%edi)			/* copy by doublewords */
 
 	movl %edx, %ecx
 	andl $3, %ecx
@@ -1266,14 +1259,9 @@ pm_copy:
 .Lpc_copyrest:
 	movl %edx, %ecx
 	andl $3, %ecx				/* mask for 4B word */
-
-.Lpc_miniloop:
-	lodsb
-	stosb
-	loop .Lpc_miniloop
+	rep movsb (%esi),(%edi)
 
 .Lpc_rmprep:
-
 	movl %cr0, %eax				/* prepare to jump to RM again */
 	dec %eax
 	movl %eax, %cr0
@@ -1283,8 +1271,6 @@ pm_copy:
 	xorl %eax,%eax
 	movw %ax, %ds
 	movw %ax, %es
-	cli
-	hlt
 	movw %bp, %sp
 	popw %bp
 	popl %edi
