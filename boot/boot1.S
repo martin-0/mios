@@ -577,7 +577,7 @@ panic16:
 		.word 0			/* base 0-15 */
 		.byte 0x0		/* base 16-23 */
 		.byte 0x9a		/* access: RTL: present, ring0, code segment, executable, grows up, rx, accessed=0 */
-		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
+		.byte 0x0		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
 		.byte 0			/* base 24-31 */
 
 		/* data in real mode */
@@ -585,7 +585,7 @@ panic16:
 		.word 0			/* base 0-15 */
 		.byte 0x0		/* base 16-23 */
 		.byte 0x92		/* access: RTL: present, ring0, data segment, non-exec, grows up, rw, accessed=0 */
-		.byte 0xf		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
+		.byte 0x0		/* RTL: flags-limit 16-19: , flags: 16b protected mode segment, byte granularity */
 		.byte 0			/* base 24-31 */
 
 		/* XXX: TSS segment should be defined ; I need to think of memory layout though, base should be the designated mem, limit
