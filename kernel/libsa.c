@@ -6,7 +6,7 @@
 #include "libsa.h"
 #include "cons.h"
 
-uint32_t printf(char* fmt, ...) { 
+uint32_t printk(char* fmt, ...) {
 	va_list ap;
 	
 	long_t lnr;
@@ -45,8 +45,8 @@ uint32_t printf(char* fmt, ...) {
 
 								lnr = va_arg(ap, long_t);
 
-								helper_printf_x(lnr.high,islz,c);
-								helper_printf_x(lnr.low,islz,c);
+								helper_printk_x(lnr.high,islz,c);
+								helper_printk_x(lnr.low,islz,c);
 								break;
 
 						/* XXX
@@ -73,7 +73,7 @@ uint32_t printf(char* fmt, ...) {
 								c = (*fmt & 0x20) ? 0x57 : 0x37;
 								uint16_t nr2 = (uint16_t)va_arg(ap, uint32_t);
 
-								helper_printf_x16(nr2, islz, c);
+								helper_printk_x16(nr2, islz, c);
 								break;
 						default:
 								putc(*fmt);
@@ -95,12 +95,12 @@ uint32_t printf(char* fmt, ...) {
 
 						c = (*fmt & 0x20) ? 0x57 : 0x37;
 
-						helper_printf_x(nr,islz,c);
+						helper_printk_x(nr,islz,c);
 						break;
 
 				case 'u':
 						nr = va_arg(ap, uint32_t);
-						helper_printf_u(nr, 1);
+						helper_printk_u(nr, 1);
 						break;
 				case 'd':
 						nr = va_arg(ap, uint32_t);
@@ -108,7 +108,7 @@ uint32_t printf(char* fmt, ...) {
 							putc('-');
 							nr = ~nr +1;
 						}
-						helper_printf_u(nr, 1);
+						helper_printk_u(nr, 1);
 						break;
 
 				case 'c':
@@ -138,7 +138,7 @@ uint32_t printf(char* fmt, ...) {
 	return 0;
 }
 
-void helper_printf_u(uint32_t nr, char lz) {
+void helper_printk_u(uint32_t nr, char lz) {
 	uint32_t i,divisor = DIVISOR_INT_32;
 
 	while (divisor > 0) { 
@@ -155,7 +155,7 @@ void helper_printf_u(uint32_t nr, char lz) {
 	}
 }
 
-void helper_printf_x(uint32_t nr, char lz, char ofst) {
+void helper_printk_x(uint32_t nr, char lz, char ofst) {
 	uint16_t i;
 	char c;
 
@@ -175,7 +175,7 @@ void helper_printf_x(uint32_t nr, char lz, char ofst) {
 	}
 }
 
-void helper_printf_x16(uint16_t nr, char lz, char ofst) {
+void helper_printk_x16(uint16_t nr, char lz, char ofst) {
 	uint16_t i;
 	char c;
 
@@ -202,11 +202,11 @@ void dump_memory(uint32_t* addr, uint32_t size) {
 	// round up chunks
 	chunks = ( size + sizeof(uint32_t)-1 ) / sizeof(uint32_t);	
 
-	printf("%p", cur_addr);
+	printk("%p", cur_addr);
 	for(i =0; i < chunks; i++) {
-		printf("\t%p", *cur_addr++);
+		printk("\t%p", *cur_addr++);
 		if ((i+1)%4 == 0) {
-			printf("\n%p", cur_addr);
+			printk("\n%p", cur_addr);
 		}
 	}
 	putc('\n');
