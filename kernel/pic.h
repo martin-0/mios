@@ -77,13 +77,14 @@ void install_handler(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uin
 void debug_status_8259(char* caller);
 void check_irq_stats(void);
 
-void irq0_handler(struct irqframe* f);
-void irq1_handler(struct irqframe* f);
+void irq0_handler(struct trapframe* f);
+void irq1_handler(struct trapframe* f);
 
 void debug_install_irq1(void);
-void debug_dump_irqframe(struct irqframe* f);
-void debug_dump_trapframe(struct trapframe* f);
+void debug_irq_frame(struct trapframe* f);
+void debug_trap_frame(struct trapframe* f);
+void unused_trap_handler(struct trapframe* f);
 
-void handle_nmi(struct irqframe* f, uint16_t reason);
+void handle_nmi(struct trapframe* f, uint16_t reason);
 
 #endif /* ifndef HAVE_PIC_H */
