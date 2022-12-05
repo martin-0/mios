@@ -24,7 +24,7 @@ physical_map_t pm;						// contains the whole 4GB memory range
 
 void init_pm() {
 	#ifdef DEBUG_PM
-		printf("init_pm: smap: %p, entries: %d\n", smap, smap->count);
+		printk("init_pm: smap: %p, entries: %d\n", smap, smap->count);
 	#endif
 
 	uint32_t i,idx,bitpos;
@@ -63,7 +63,7 @@ void init_pm() {
 		}
 
 		#ifdef DEBUG_PM
-			printf("init_pm: %d: adjusted map:\t0x%x - 0x%x, len: 0x%x, pages: %d\n", i,base, end, end-base, (end-base)/PAGE_SIZE);
+			printk("init_pm: %d: adjusted map:\t0x%x - 0x%x, len: 0x%x, pages: %d\n", i,base, end, end-base, (end-base)/PAGE_SIZE);
 		#endif
 
 		// NOTE: a bit annoying but seems practical to do it here. if we start at bitpos other than 0 we need to set blocks
@@ -85,12 +85,12 @@ void init_pm() {
 
 			if (pm.blocks > MM_MAX_BLOCKS) {
 				// XXX: create panic function
-				printf("init_pm: fatal error, too many blocks:  pm.blocks: %d\n", pm.blocks);
+				printk("init_pm: fatal error, too many blocks:  pm.blocks: %d\n", pm.blocks);
 				asm("cli;hlt");
 			}
 		}
 	}
-	printf("init_pm: valid blocks: %d, pages: %d, free memory: %d MB\n", pm.blocks, pm.pages, (pm.pages*PAGE_SIZE) >> 20);
+	printk("init_pm: valid blocks: %d, pages: %d, free memory: %d MB\n", pm.blocks, pm.pages, (pm.pages*PAGE_SIZE) >> 20);
 }
 
 // returns one page size
@@ -117,14 +117,14 @@ void* alloc_page_pm() {
 				page = (void*)(idx*BLOCK_SIZE + bit*PAGE_SIZE);
 
 				#ifdef DEBUG_PM
-					printf("alloc_page_pm: page: %p, idx: %d, bit %d\n", page, idx, bit);
+					printk("alloc_page_pm: page: %p, idx: %d, bit %d\n", page, idx, bit);
 				#endif
 				goto out;
 			}
 			curblock >>= 1;
 		}
 	}
-	printf("alloc_page_pm: no free pages\n");
+	printk("alloc_page_pm: no free pages\n");
 
 out:
 	return page;
@@ -135,7 +135,7 @@ void free_page_pm(void* addr) {
 	uint32_t bitpos = ((paddr_t)addr % BLOCK_SIZE)/PAGE_SIZE;
 
 	#ifdef DEBUG_PM
-		printf("free_page_pm: address: %p, block: %d, bitpos: %d\n", (paddr_t)addr, idx, bitpos);
+		printk("free_page_pm: address: %p, block: %d, bitpos: %d\n", (paddr_t)addr, idx, bitpos);
 	#endif
 	pm.block_map[idx] &= ~(1 << bitpos);
 }
@@ -144,11 +144,11 @@ void show_e820map() {
 	uint32_t i;
 	uint64_t usable = 0;
 
-	printf("memory map address: %p, entries: %d, size: %d\n", smap, smap->count, smap->entry_size);
+	printk("memory map address: %p, entries: %d, size: %d\n", smap, smap->count, smap->entry_size);
 	for (i = 0; i < smap->count; i++) {
-		printf("%d: 0x%llx - 0x%llx\t%s\n", i,smap->map[i].e_base, smap->map[i].e_base + smap->map[i].e_len, e820_mem_types[smap->map[i].e_type]);
+		printk("%d: 0x%llx - 0x%llx\t%s\n", i,smap->map[i].e_base, smap->map[i].e_base + smap->map[i].e_len, e820_mem_types[smap->map[i].e_type]);
 		if (smap->map[i].e_type == E820_TYPE_AVAIL) usable += smap->map[i].e_len;
 	}
 	usable >>= 20;
-	printf("total usable memory: %d MB\n", (uint32_t)usable);
+	printk("total usable memory: %d MB\n", (uint32_t)usable);
 }

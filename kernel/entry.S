@@ -1,10 +1,5 @@
 /* martin */
 
-
-/* MAKE SURE all assembly code is obeying regparam! I chose that but didn't fix the code 6 months ago */
-
-
-
 	.set ADDR_STACKSTART,	0x1ff00
 
 .section .text
@@ -27,7 +22,7 @@ _kernel_entry:
 
 	call clrscr
 
-	// XXX: installes all handlers, sets to default (even irq0,1..)
+	// XXX: installs all handlers, sets to default (even irq0,1..)
 	call init_idt				/* setup the tables */
 	lidt (IDT)
 
