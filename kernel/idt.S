@@ -1,7 +1,5 @@
 /* martin */
 
-// XXX: figure out how to deal with the irq and dummy pushed on stack so we have one same frame for both irq and trap
-
 .section .text
 	.code32
 
