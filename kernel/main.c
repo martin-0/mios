@@ -16,15 +16,14 @@ extern uint64_t ticks;
 //char verybigbuf[2*1024*1024];
 
 void kernel_main() {
-	printf("welcome to kernel_main\n");
+	printk("welcome to kernel_main\n");
 
 	show_e820map();
 	init_pm();
 //	uint64_t old;
-
 //	asm ("int $0x14");
-
 //	old = ticks;
+
 	for (;; ) {
 		asm ("hlt");
 	/*
