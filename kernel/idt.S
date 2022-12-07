@@ -196,7 +196,7 @@ irq_handler_dflt:
 .global dummy_int11_handler
 .func dummy_int11_handler
 dummy_int11_handler:
-	/* frame is prepped by the __irq_setframe_early */
+	/* frame is prepped by the __trap_setframe_early */
 	call debug_trap_frame
 	addl $2, 0x30(%esp)			// XXX: dummy fix for int 0x11
 	ret

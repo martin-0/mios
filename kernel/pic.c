@@ -227,6 +227,10 @@ void init_pit(void) {
 	#endif
 }
 
+/* NOTE:
+	setup_idt_entry() sets the entries in the IDT. It's the early part of the interrupt/trap where
+	stack frame is set and then irq_handlers[] or trap_handlers[] are called by the early handler code.
+*/
 void setup_idt_entry(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uint8_t type) {
 	interrupt_desc_t s = {
 			.base_lo = (uint32_t)*handler & 0xffff,
@@ -375,6 +379,6 @@ void debug_trap_frame(struct trapframe* f) {
 }
 
 void unused_trap_handler(struct trapframe* f) {
-	printk("caught unused trap handler!\n");
+	printk("unused_trap_handler: default trap handler\n");
 	debug_trap_frame(f);
 }
