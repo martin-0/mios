@@ -28,10 +28,11 @@ _kernel_entry:
 
 	call init_8259				/* PIC and PIT */
 
-	// NOTE: installed irq0 handler
+	// NOTE: installs irq0 handler
 	call init_pit
 
-	call debug_install_irq1
+	// install keyboard driver
+	call __init_kbd_module
 
 	sti 					/* enable interrupts */
 
