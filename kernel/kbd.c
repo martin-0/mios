@@ -11,12 +11,12 @@ void __init_kbd_module() {
 	clear_irq(1);
 }
 
+// handler exists to the irq_cleanup code
 void kbd_handler(struct trapframe* f) {
 
         uint8_t scancode = inb(0x60);
         printk("kbd_handler: frame: %p, scan code: %x\n", f, scancode);
 
-        // XXX: debugging ; this really should not be part of the irq1 handler
         switch(scancode) {
         // S
         case 0x1f:      check_irq_stats();

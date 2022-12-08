@@ -72,6 +72,7 @@ irq_dispatch:
 	movl %edi, %eax				/* stackframe as an argument */
 	call *(%ebx,%esi,4)			/* NOTE: handler sends EOI */
 
+irq_cleanup:
 	movl %esi, %eax
 	call clear_irq
 
