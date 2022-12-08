@@ -25,8 +25,6 @@
 	#include "libsa.h"
 #endif
 
-extern void show_e820map();
-
 interrupt_desc_t idt_entries[IDT_ENTRIES];			// IDT entries
 
 /* entry.S is loading this table */
@@ -39,7 +37,7 @@ volatile uint64_t ticks;					// IRQ0 ticks
 interrupt_handler_t irq_handlers[IRQ_ENTRIES];			// IRQ handlers
 uint64_t irq_stats[IRQ_ENTRIES];				// IRQ stats
 
-trap_handler_t trap_handlers[TRAP_ENTRIES_LOW];			// actual trap handler
+trap_handler_t trap_handlers[TRAP_ENTRIES_LOW];			// actual trap handlers
 
 trap_desc_t traps[TRAP_ENTRIES_LOW] = {
 		{ "Divide by zero",			0, 0 },
@@ -242,6 +240,10 @@ void setup_idt_entry(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uin
 	idt_entries[irq] = s;
 }
 
+inline void set_interrupt_handler(interrupt_handler_t handler, uint8_t irq) {
+	irq_handlers[irq] = handler;
+}
+
 void init_idt() {
 	uint32_t i,j,ofst;
 
@@ -296,39 +298,6 @@ void irq0_handler(__attribute__ ((unused)) struct trapframe* f) {
 	send_8259_EOI(0);
 }
 
-void irq1_handler(struct trapframe* f) {
-	uint8_t scancode = inb(0x60);
-	printk("irq1_handler frame: %p, scan code: %x\n", f, scancode);
-
-	// XXX: debugging ; this really should not be part of the irq1 handler
-	switch(scancode) {
-	// S
-	case 0x1f:	check_irq_stats();
-			break;
-
-	// I
-	case 0x17:	debug_status_8259("irq1_handler");
-			break;
-
-	// D
-	case 0x20:
-			debug_irq_frame(f);
-			break;
-	// K
-	case 0x25:	asm("int $0x80");
-			break;
-	// N
-	case 0x31:	__asm__ ("int $2");
-			break;
-
-	// M
-	case 0x32:	show_e820map();
-			break;
-	}
-
-	send_8259_EOI(1);
-}
-
 void debug_status_8259(char* caller) {
 	uint8_t r1,r2, r3;
 	write_8259(MASTER_PIC_COMMAND, OCW3_RQ_IRR);	// IR
@@ -350,12 +319,6 @@ void debug_status_8259(char* caller) {
 	printk("%s: slave: IRR: %x (pending ACKs), IMR: %x (mask), ISR: %x (EOI waiting)\n", caller, r1,r2,r3);
 }
 
-// XXX: this is actually being installed by entry.S !
-void debug_install_irq1(void) {
-	irq_handlers[1] = irq1_handler;
-        clear_irq(1);
-}
-
 void check_irq_stats(void) {
 	uint32_t i;
 	for (i =0 ; i < 16; i++) {
@@ -363,7 +326,6 @@ void check_irq_stats(void) {
 	}
 }
 
-// XXX: will produce garbage output as this is not yet done properly in idt.S
 void debug_irq_frame(struct trapframe* f) {
 	printk("----- IRQ ------\ninterrupt: %d\nEIP: %p\tESP: %p\tEBP: %p\n"
 		"EAX: %p\tEBX: %p\tECX: %p\nEDX: %p\tEDI: %p\tESI: %p\n"

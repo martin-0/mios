@@ -72,6 +72,7 @@ void clear_irq(uint8_t irq);
 void init_pit(void);
 
 void install_handler(interrupt_handler_t handler, uint16_t sel, uint8_t irq, uint8_t type);
+void set_interrupt_handler(interrupt_handler_t handler, uint8_t irq);
 
 // debug
 void debug_status_8259(char* caller);
