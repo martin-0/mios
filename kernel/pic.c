@@ -93,8 +93,8 @@ extern void dummy_int80_handler(struct trapframe* f);
 
 // NOTE: static inlines can't be included in headers
 static inline void write_8259(uint8_t ctrl, uint8_t cmd) {
-	outb(ctrl, cmd);
-	delay_out();
+	outb(cmd, ctrl);
+	delay_p80();
 }
 
 static inline int8_t read_8259(uint8_t ctrl) {
@@ -104,24 +104,24 @@ static inline int8_t read_8259(uint8_t ctrl) {
 void init_8259(void) {
 
 	// ICW1: send INIT to PICs
-	outb(MASTER_PIC_COMMAND, 0x11);
-	outb(SLAVE_PIC_COMMAND, 0x11);
-	delay_out();
+	outb(0x11, MASTER_PIC_COMMAND);
+	outb(0x11, SLAVE_PIC_COMMAND);
+	delay_p80();
 
 	// ICW2: actual remapping of IRQs
-	outb(MASTER_PIC_DATA, 0x20);				// IRQ 0-7  0x20-0x27 
-	outb(SLAVE_PIC_COMMAND, 0x28);				// IRQ 8-15 0x28-0x2f
-	delay_out();
+	outb(0x20, MASTER_PIC_DATA);				// IRQ 0-7  0x20-0x27
+	outb(0x28, SLAVE_PIC_COMMAND);				// IRQ 8-15 0x28-0x2f
+	delay_p80();
 
 	// ICW3: set relationship between master and slave PIC 
-	outb(MASTER_PIC_DATA, 4);				// 2nd bit - IRQ2 goes to slave 
-	outb(SLAVE_PIC_COMMAND, 2);				// bit notation: 010: master IRQ to slave
-	delay_out();
+	outb(4, MASTER_PIC_DATA);				// 2nd bit - IRQ2 goes to slave
+	outb(2, SLAVE_PIC_COMMAND);				// bit notation: 010: master IRQ to slave
+	delay_p80();
 	
 	// ICW4: x86 mode
-	outb(MASTER_PIC_DATA, 1);
-	outb(SLAVE_PIC_COMMAND, 1);
-	delay_out();
+	outb(1, MASTER_PIC_DATA);
+	outb(1, SLAVE_PIC_COMMAND);
+	delay_p80();
 
 	// on slave disable all IRQs
 	write_8259(SLAVE_PIC_DATA, ~0);
@@ -146,7 +146,7 @@ void mask_irq(uint8_t irq) {
 		ctrl = MASTER_PIC_DATA;
 	}
 	cur_m = read_8259(ctrl);
-	delay_out();
+	delay_p80();
 
 	#ifdef DEBUG_IRQ
 		if (irq) printk("mask_irq%d: curmask: %x\n", irq, cur_m);
@@ -160,7 +160,7 @@ void mask_irq(uint8_t irq) {
 	#endif
 
 	write_8259(ctrl, cur_m);
-	delay_out();
+	delay_p80();
 
 	#ifdef DEBUG_IRQ
 		if (irq) debug_status_8259("mask_irq");
@@ -179,7 +179,7 @@ void clear_irq(uint8_t irq) {
 		ctrl = MASTER_PIC_DATA;
 	}
 	cur_m = read_8259(ctrl);
-	delay_out();
+	delay_p80();
 
 	#ifdef DEBUG_IRQ 
 		if (irq) printk("clear_irq%d: curmask: %x\n", irq, cur_m);
@@ -192,7 +192,7 @@ void clear_irq(uint8_t irq) {
 	#endif
 
 	write_8259(ctrl, cur_m);
-	delay_out();
+	delay_p80();
 
 	#ifdef DEBUG_IRQ
 		if (irq) debug_status_8259("clear_irq");
@@ -201,20 +201,20 @@ void clear_irq(uint8_t irq) {
 
 void send_8259_EOI(uint8_t irq) {
 	if (irq > 7)
-		outb(SLAVE_PIC_COMMAND, OCW2_EOI);
+		outb(OCW2_EOI, SLAVE_PIC_COMMAND);
 
-	outb(MASTER_PIC_COMMAND, OCW2_EOI);
-	delay_out();
+	outb(OCW2_EOI, MASTER_PIC_COMMAND);
+	delay_p80();
 }
 
 void init_pit(void) {
-	outb(PIT_MODE_CMD_REG, 0x36);		/* ch0, lo/hi access, square wave gen, count in 16bit binary */
+	outb(0x36, PIT_MODE_CMD_REG);		/* ch0, lo/hi access, square wave gen, count in 16bit binary */
 	
 	/* XXX: using static FQ 100hz (0x2a9b) for channel 0 */
-	outb(PIT_CHANNEL_0, 0x9b);
-	delay_out();
-	outb(PIT_CHANNEL_0, 0x2e);
-	delay_out();
+	outb(0x9b, PIT_CHANNEL_0);
+	delay_p80();
+	outb(0x2e, PIT_CHANNEL_0);
+	delay_p80();
 
 	// IRQ0 handler can be installed now
 	irq_handlers[0] = irq0_handler;

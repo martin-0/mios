@@ -66,15 +66,15 @@ typedef struct regs {
  *	+	Means that this operand is both read and written by the instruction.
  */
 
-static inline void outb(uint16_t port, uint8_t val) {
+static inline void outb(uint8_t val, uint16_t port) {
 	asm volatile("outb %0, %1" : : "a"(val), "dN"(port));
 }
 
-static inline void outw(uint16_t port, uint16_t val) {
+static inline void outw(uint16_t val, uint16_t port) {
 	asm volatile("outw %0, %1" : : "a"(val), "dN"(port));
 }
 
-static inline void outl(uint16_t port, uint32_t val) {
+static inline void outl(uint32_t val, uint16_t port) {
 	asm volatile("outl %0,%1" : : "a"(val), "dN"(port));
 }
 
@@ -150,7 +150,7 @@ static inline uint32_t rorr(uint32_t v) {
 	return t;
 }
 
-static inline void delay_out(void) {
+static inline void delay_p80(void) {
 	asm volatile("outb %al, $0x80");	
 }
 
