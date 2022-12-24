@@ -61,4 +61,5 @@ if [ "z${MONITOR}" = "z" ]; then
 fi
 
 qemu-system-i386 ${KVM} -m 512 -s ${DEBUG} ${MONITOR} ${QDISPLAY} ${EXTRAPARAM} \
--drive id=disk,file=${DISK},if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0
+-drive id=disk,file=${DISK},if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 \
+-chardev socket,id=serial0,path=/tmp/serial0,server=on,wait=off -serial chardev:serial0
