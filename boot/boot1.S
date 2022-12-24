@@ -320,6 +320,11 @@ _start:
 	testw %ax,%ax
 	jnz .Lb1_haltme
 
+	pushl $ADDR_KERNEL_ENTRY			/* show where the kernel is being loaded */
+	pushw $(msg_jmp_kern)
+	call printf16
+	addw $6, %sp
+
 	/* prepare to jump */
         cli
         lgdt (gdt_desc)
@@ -607,6 +612,8 @@ panic16:
 	msg_bios_err:	.asciz	"BIOS function failed, error code: %x\r\n"
 	msg_mem_err:	.asciz	"Failed to get memory map from BIOS.\r\n"
 	msg_haltnow:	.asciz	"boot1: system halted for now.\r\n"
+
+	msg_jmp_kern:	.asciz	"\r\nkernel @ 0x%lx\r\n"
 
 	panic_stack:	.asciz	"stack:\r\n"
 	func_debug1:	.asciz	"debug: 0x%x\r\n"
