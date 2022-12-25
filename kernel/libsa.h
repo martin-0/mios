@@ -45,4 +45,7 @@ void helper_printk_u(uint32_t nr, char lz);
 
 void dump_memory(uint32_t* addr, uint32_t size);
 
+char* memset(char* str, int c, uint32_t size);
+
+
 #endif /* ifndef HAVE_LIBSA_H */

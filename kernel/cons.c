@@ -4,6 +4,10 @@
 #include "cons.h"
 #include "libsa.h"
 
+#include "uart.h"
+
+extern uint16_t com1_console;
+
 uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;		// XXX: probably not needed as global variable .. 
 
 // XXX:	well, this is an assumption .. we don't know what screen size we're set to .. 
@@ -17,6 +21,10 @@ void puts(char* s) {
 	char c;
 	while ((c = *s++)) {
 		cputc(c, DEFAULT_CHAR_ATTRIB);
+
+		if (com1_console)
+			dbg_uart_write(c, com1_console);
+
 	}
 }
 
@@ -28,6 +36,12 @@ void cputc(char c, char attrib) {
 			clearto(COLS);
 			cursy++;
 			cursx =0;
+
+			if (com1_console) {
+				dbg_uart_write('\r', com1_console);
+				dbg_uart_write('\n', com1_console);
+			}
+
 			goto exit;
 
 	case '\t':	
@@ -50,6 +64,9 @@ void cputc(char c, char attrib) {
 	
 	*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | c; 
 	cursx++;
+
+	if (com1_console)
+		dbg_uart_write(c, com1_console);
 
 exit:
 	if (cursx >= COLS) { 

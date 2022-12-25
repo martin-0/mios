@@ -5,6 +5,7 @@
 
 #include "libsa.h"
 #include "cons.h"
+#include "uart.h"
 
 uint32_t printk(char* fmt, ...) {
 	va_list ap;

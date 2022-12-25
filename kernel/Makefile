@@ -22,7 +22,7 @@ CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-pr
 CFLAGS+=-I$(INCDIR) -DDEBUG -DDEBUG_TRAP -DDEBUG_PM
 #CFLAGS+=-DDEBUG_IRQ -DDEBUG_TRAP
 
-SRCO= entry.o main.o cons.o pic.o idt.o mm.o kbd.o libsa.o
+SRCO= entry.o main.o cons.o pic.o idt.o mm.o kbd.o uart.o libsa.o
 
 all: kernel
 
@@ -52,6 +52,9 @@ mm.o: mm.c
 
 kbd.o: kbd.c kbd.h
 	$(CC) $(CFLAGS) kbd.c -c -o $(OBJDIR)/kbd.o
+
+uart.o: uart.c uart.h
+	$(CC) $(CFLAGS) uart.c -c -o $(OBJDIR)/uart.o
 
 clean:
 	cd $(OBJDIR) && rm -f $(SRCO) kernel
