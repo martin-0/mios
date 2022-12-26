@@ -21,10 +21,6 @@ void puts(char* s) {
 	char c;
 	while ((c = *s++)) {
 		cputc(c, DEFAULT_CHAR_ATTRIB);
-
-		if (com1_console)
-			dbg_uart_write(c, com1_console);
-
 	}
 }
 
