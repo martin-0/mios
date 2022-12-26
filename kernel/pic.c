@@ -93,12 +93,11 @@ extern void dummy_int80_handler(struct trapframe* f);
 
 // NOTE: static inlines can't be included in headers
 static inline void write_8259(uint8_t ctrl, uint8_t cmd) {
-	outb(cmd, ctrl);
-	delay_p80();
+	outb_p(cmd, ctrl);
 }
 
 static inline int8_t read_8259(uint8_t ctrl) {
-	return inb(ctrl);
+	return inb_p(ctrl);
 }
 
 void init_8259(void) {
@@ -146,7 +145,6 @@ void mask_irq(uint8_t irq) {
 		ctrl = MASTER_PIC_DATA;
 	}
 	cur_m = read_8259(ctrl);
-	delay_p80();
 
 	#ifdef DEBUG_IRQ
 		if (irq) printk("mask_irq%d: curmask: %x\n", irq, cur_m);
@@ -160,7 +158,6 @@ void mask_irq(uint8_t irq) {
 	#endif
 
 	write_8259(ctrl, cur_m);
-	delay_p80();
 
 	#ifdef DEBUG_IRQ
 		if (irq) debug_status_8259("mask_irq");
@@ -179,7 +176,6 @@ void clear_irq(uint8_t irq) {
 		ctrl = MASTER_PIC_DATA;
 	}
 	cur_m = read_8259(ctrl);
-	delay_p80();
 
 	#ifdef DEBUG_IRQ 
 		if (irq) printk("clear_irq%d: curmask: %x\n", irq, cur_m);
@@ -192,7 +188,6 @@ void clear_irq(uint8_t irq) {
 	#endif
 
 	write_8259(ctrl, cur_m);
-	delay_p80();
 
 	#ifdef DEBUG_IRQ
 		if (irq) debug_status_8259("clear_irq");
@@ -201,20 +196,17 @@ void clear_irq(uint8_t irq) {
 
 void send_8259_EOI(uint8_t irq) {
 	if (irq > 7)
-		outb(OCW2_EOI, SLAVE_PIC_COMMAND);
+		outb_p(OCW2_EOI, SLAVE_PIC_COMMAND);
 
-	outb(OCW2_EOI, MASTER_PIC_COMMAND);
-	delay_p80();
+	outb_p(OCW2_EOI, MASTER_PIC_COMMAND);
 }
 
 void init_pit(void) {
 	outb(0x36, PIT_MODE_CMD_REG);		/* ch0, lo/hi access, square wave gen, count in 16bit binary */
 	
 	/* XXX: using static FQ 100hz (0x2e9b) for channel 0 */
-	outb(0x9b, PIT_CHANNEL_0);
-	delay_p80();
-	outb(0x2e, PIT_CHANNEL_0);
-	delay_p80();
+	outb_p(0x9b, PIT_CHANNEL_0);
+	outb_p(0x2e, PIT_CHANNEL_0);
 
 	// IRQ0 handler can be installed now
 	irq_handlers[0] = irq0_handler;
