@@ -54,26 +54,24 @@ void __init_kbd_module() {
 void kbd_handler(__attribute__((unused)) struct trapframe* f) {
 
         uint8_t scancode = kbd_get_data();
+
+	/*
 	printk("%x ", scancode);
 
 	printk("kbd: cursize: %d\n", kbd.cursize);
-
 	if (kbd.cursize >= KBD_MAX_IDX) {
 		printk("kbd: WARNING: buffer full, not buffering..\n");
 	} else {
 		kbd.kbuf[kbd.cursize++] = scancode;
 	}
+	*/
 
 	lastc = scancode;
 
 	send_8259_EOI(1);
 }
 
-// XXX
+// XXX i know, i know .. but for the time being my focus is on uart, so i'll let it be
 uint8_t getc() {
-	while( kbd.cursize == 0) {
-		asm("hlt;");
-	}
-
 	return lastc;
 }
