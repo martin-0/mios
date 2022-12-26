@@ -15,24 +15,22 @@
 
 extern uint64_t ticks;
 
-uint16_t com1_console;
+uint16_t com1_console;	// init in entry.S
 
 void kernel_main() {
-	uint32_t i =0;
-	com1_console = 0;	// default
-
-	if ( (init_uart(COM1_BASE)) == 0 )
-		com1_console = COM1_BASE;
 
 	printk("welcome to kernel_main\n");
 
 	uint8_t key;
 	for (;; ) {
-	/*
 		key = getc(); // blocking on halt here!
 		//printk("main: key: %x\n", key);
 		// test
 		switch(key) {
+		// A
+		case 0x1e:	//dbg_uart_show(COM1_BASE);
+				dbg_uart_write('A', COM1_BASE);
+				break;
 		// S
 		case 0x1f:      check_irq_stats();
 				break;
@@ -53,13 +51,16 @@ void kernel_main() {
 				break;
 
 		}
-	*/
+
+	/*
+	uint32_t i =0;
 		i++;
 		asm("hlt");
 		if ( i > 512 ) {
 			i= 0;
 			check_irq_stats();
 		}
+	*/
 	}
 
 }

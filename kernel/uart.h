@@ -3,57 +3,11 @@
 
 #include <stdint.h>
 
-/* 
-
-Line Control Register (LCR) +3
-	7		Divisor Latch Access Bit
-	----------------------------------------
-	6		Set Break Enable
-	----------------------------------------
-		5 4 3	parity select
-		-----------------------
-	3,4,5	0 0 0	no parity
-		0 0 1	odd parity
-		0 1 1	even parity
-		1 0 1	mark
-		1 1 1	space
-	----------------------------------------
-	2	0	one stop bit
-		1	1.5 stop bits or 2 stop bits
-	----------------------------------------
-	0,1	1 0
-		------------------------
-		0 0	5 bits
-		0 1	6 bits
-		1 0	7 bits
-		1 1	8 bits
-	-----------------------------------------
-
-
-Line Status Register (LSR) +5
-	7 	Error in Received FIFO
-	----------------------------------------
-	6 	Empty Data Holding Registers
-	----------------------------------------
-	5 	Empty Transmitter Holding Register
-	----------------------------------------
-	4 	Break Interrupt
-	----------------------------------------
-	3 	Framing Error
-	----------------------------------------
-	2 	Parity Error
-	----------------------------------------
-	1 	Overrun Error
-	----------------------------------------
-	0 	Data Ready
-	
-*/
-
 #define	COM1_BASE	0x3f8
 
 #define	UART_REG_DLL		0	// divisor latch low byte
 #define	UART_REG_DLH		1	// divisor latch high byte
-#define	UART_REG_LCR		3	// line control register
+#define	UART_REG_LCR		3	// line control register (read/write)
 #define	UART_REG_LSR		5	// line status register
 
 
@@ -87,8 +41,10 @@ typedef struct uart_type {
 } uart_type_t;
 
 uart_id_t uart_ident(uint16_t base);
-int init_uart(uint16_t base);
+int early_uart_init(uint16_t base);
+int uart_set_baud(uint16_t base, uint32_t speed);
 
 void dbg_uart_write(char c, int16_t base);
+void dbg_uart_show(uint16_t base);
 
 #endif /* ifndef HAVE_UART_H */

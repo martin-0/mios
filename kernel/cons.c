@@ -25,7 +25,7 @@ void puts(char* s) {
 }
 
 void cputc(char c, char attrib) {
-	uint16_t t;
+	uint16_t i,t;
 	/* handle special cases of character */
 	switch (c) { 
 	case '\n':	
@@ -52,17 +52,28 @@ void cputc(char c, char attrib) {
 				clearto(cursx+t);
 				cursx += t;
 			}
+
+			if (com1_console) {
+				for (i =0; i < t; i++)
+					dbg_uart_write(' ', com1_console);
+			}
+
 			goto exit;
 
 	case '\r':	cursx = 0;
+
+			if (com1_console) {
+				dbg_uart_write('\r', com1_console);
+			}
 			goto exit;
 	}
 	
 	*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | c; 
 	cursx++;
 
-	if (com1_console)
+	if (com1_console) {
 		dbg_uart_write(c, com1_console);
+	}
 
 exit:
 	if (cursx >= COLS) { 
