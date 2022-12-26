@@ -3,6 +3,7 @@ AS=/local/cross/bin/i686-elf-as
 LD=/local/cross/bin/i686-elf-ld
 
 DISK_RAW=disk00.raw
+DISK_SIZEM=8
 ROOTFS=/tmp/rootfs
 BLOCKSIZE=1024
 
@@ -30,8 +31,8 @@ tools:
 
 disk:
 	rm -f $(DISK_RAW)
-	dd if=/dev/zero of=$(DISK_RAW) bs=1024k count=256
-	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:736f696d-0001-0002-0003-feedcafef00d -n 2:4096:266239 -t 2:8300 ./disk00.raw
+	dd if=/dev/zero of=$(DISK_RAW) bs=1024k count=${DISK_SIZEM}
+	/sbin/sgdisk -a 1 -n 1:2048:3071 -t 1:736f696d-0001-0002-0003-feedcafef00d -n 2:4096: -t 2:8300 ./disk00.raw
 	sudo losetup -P /dev/loop0 ./disk00.raw
 	sudo mkfs.ext2 -b $(BLOCKSIZE) /dev/loop0p2
 	sudo losetup -D
