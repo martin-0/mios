@@ -96,6 +96,37 @@ static inline uint32_t inl(uint16_t port) {
 	return ret;
 }
 
+// same as above but with delay
+static inline void outb_p(uint8_t val, uint16_t port) {
+	asm volatile("outb %0, %1; outb %%al, $0x80" : : "a"(val), "dN"(port));
+}
+
+static inline void outw_p(uint16_t val, uint16_t port) {
+	asm volatile("outw %0, %1; outb %%al, $0x80" : : "a"(val), "dN"(port));
+}
+
+static inline void outl_p(uint32_t val, uint16_t port) {
+	asm volatile("outl %0,%1; outb %%al, $0x80" : : "a"(val), "dN"(port));
+}
+
+static inline uint8_t inb_p(uint16_t port) {
+	uint8_t ret;
+	asm volatile("inb %1, %0; outb %%al, $0x80" : "=a"(ret) : "dN"(port));
+	return ret;
+}
+
+static inline uint16_t inw_p(uint16_t port) {
+	uint16_t ret;
+	asm volatile("intw %1, %0; outb %%al, $0x80" : "=a"(ret) : "dN"(port));
+	return ret;
+}
+
+static inline uint32_t inl_p(uint16_t port) {
+	uint32_t ret;
+	asm volatile("intl %1, %0; outb %%al, $0x80" : "=a"(ret) : "dN"(port));
+	return ret;
+}
+
 /* set segment registers */
 static inline void set_ds(uint16_t val) {
 	asm volatile("movw %0, %%ds"  : : "rm"(val));
