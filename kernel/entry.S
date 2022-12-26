@@ -20,7 +20,21 @@ _kernel_entry:
 
 	movl $ADDR_STACKSTART, %esp
 
+	xorl %eax, %eax
+	movw %ax, (com1_console)		/* default off */
+
 	call clrscr
+
+	/* XXX: problem with this approach is we don't have IDT set yet. init_uart can't set serial vectors here
+		maybe I should rename it to early_init or something
+	*/
+	movw $0x3f8, %ax
+	call early_uart_init
+	testw %ax, %ax
+	jnz 1f					/* if init failed com1_console stays 0 */
+	movw $0x3f8, (com1_console)
+
+1:
 
 	// XXX: installs all handlers, sets to default (even irq0,1..)
 	call init_idt				/* setup the tables */
