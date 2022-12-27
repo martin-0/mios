@@ -6,8 +6,6 @@
 // XXX: I should maybe get rid of func32 functions. While they operate on 32b regs
 // XXX:	I can't address mem > 0xffff with them.
 
-// XXX: writting to com0 port blindly without an option not to
-
 	.set TABSPACE,	4
 
 .section .text
@@ -33,7 +31,7 @@ puts16:
 0:
         lodsb
         testb %al, %al
-        je 1f
+        jz 1f
 
         mov $0x0e, %ah			/* int 0x10, AH=0Eh: teletype output */
         int $0x10
@@ -113,6 +111,7 @@ printf16:
 .Ltab_print:
 	movw $0x0e20,%ax
         int $0x10
+
 	.ifdef SERIAL
 		call write_com0		/* %al: char to print */
 	.endif
@@ -294,6 +293,7 @@ printf16:
 .Lputc:
 	movb $0x0e,%ah
 	int $0x10
+
 	.ifdef SERIAL
 		call write_com0
 	.endif
@@ -355,6 +355,7 @@ printf16_helper_x:
 	.ifdef SERIAL
 		call write_com0
 	.endif
+
 	loop .Lhelpx_loop
 
 	pop %bx
@@ -1176,7 +1177,7 @@ diskinfo16:
 	ret
 .endfunc
 
-/* void init_com0(char port)
+/* void init_com0()
  *
  * port as expected by AH=00h, int $0x14 BIOS function
 */
@@ -1184,7 +1185,6 @@ diskinfo16:
 .func init_com0
 init_com0:
         xorw %dx, %dx
-	movb %al, %dl
         movw $0xe3, %ax                                 /* port settings: 9600bps,8N1 */
         int $0x14
 	ret
@@ -1193,33 +1193,15 @@ init_com0:
 /* void write_com0(char c)
  *
  * Only al is use as a character to print.
- * As printf16 relies on scratch registers it's easier just to pusha/popa here.
 */
 .global write_com0
 .func write_com0
 write_com0:
-	pushaw
+	pushw %dx
 	xorw %dx,%dx					/* com0 */
-	movw %ax, %si
-
-	movw $4096, %cx					/* tries before timeout */
-.Lwc0_poll:
-	movw $0x0003, %ax
+	movb $0x01, %ah
 	int $0x14
-	testb $0x20, %ah
-	jz .Lwc0_nrdy					/* not ready */
-
-	movw %si, %ax					/* write character */
-	movb $1, %ah
-	int $0x14
-	jmp .Lwc0_end
-
-.Lwc0_nrdy:
-	outb %al, $0x80					/* dummy delay */
-	loop .Lwc0_poll
-
-.Lwc0_end:
-	popaw
+	popw %dx
 	ret
 .endfunc
 

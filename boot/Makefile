@@ -37,7 +37,7 @@ elf32.o: elf32.S gboot.inc
 	$(AS) $(ASFLAGS) elf32.S -o $(OBJDIR)/elf32.o
 
 libsa16.o: libsa16.S
-	$(AS) libsa16.S -o $(OBJDIR)/libsa16.o
+	$(AS) $(ASFLAGS) libsa16.S -o $(OBJDIR)/libsa16.o
 
 pmbr:
 	make -C pmbr
