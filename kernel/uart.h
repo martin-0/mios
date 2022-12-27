@@ -5,16 +5,18 @@
 
 #define	COM1_BASE	0x3f8
 
-#define	UART_REG_DLL		0	// divisor latch low byte
-#define	UART_REG_DLH		1	// divisor latch high byte
-#define	UART_REG_LCR		3	// line control register (read/write)
-#define	UART_REG_LSR		5	// line status register
+#define	UART_REG_DLL		0	// with DLAB: divisor latch low byte (read/write)
+#define	UART_REG_DLH		1	// with DLAB: divisor latch high byte (read/write)
 
+#define	UART_REG_RBR		0	// receiver buffer (read)
+#define	UART_REG_THR		0	// transmitter holding buffer (write)
 
-#define	UART_REG_IER		1	// interrupt enable register
+#define	UART_REG_IER		1	// interrupt enable register (read/write)
 
 #define	UART_REG_IIR		2	// interrupt identification register (read)
 #define	UART_REG_FCR		2	// FIFO control register (write)
+
+#define	UART_REG_LCR		3	// line control register (read/write)
 
 #define	UART_REG_LSR		5	// line status register (read)
 					// NOTE: write is undef

@@ -21,9 +21,10 @@ void kernel_main() {
 
 	printk("welcome to kernel_main\n");
 
+	//com1_console =0 ;
 	uint8_t key;
 	for (;; ) {
-		key = getc(); // blocking on halt here!
+		key = getc();
 		//printk("main: key: %x\n", key);
 		// test
 		switch(key) {

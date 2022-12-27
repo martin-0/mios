@@ -22,12 +22,13 @@ void dbg_uart_write(char c, int16_t base) {
 	int16_t i;
 	uint8_t r;
 
-	for (i =0 ; i < 255; i++) {
-		r = inb(base + UART_REG_LSR);
+	// XXX: how much waiting is enough ? I certainly don't want to wait indefinitely..
+	for (i =0 ; i < 2048; i++) {
+		r = inb_p(base + UART_REG_LSR);
 		if (r == 0xff) goto out;		// error
 
 		if ( (r & 0x20) ) {			// Empty Transmitter Holding Register
-			outb_p(c, base + 0);
+			outb_p(c, base + UART_REG_THR);
 			goto out;
 		}
 		delay_p80();
@@ -54,6 +55,9 @@ int early_uart_init(uint16_t base) {
 
 	if (type == unknown)
 		return 1;
+
+	// no interrupts
+	outb_p(0, base + UART_REG_IER);
 
 	// 8N1
 	outb_p(3, base + UART_REG_LCR);
