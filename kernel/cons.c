@@ -70,7 +70,7 @@ void cputc(char c, char attrib) {
 	}
 
 	// XXX: assert at least for now
-	if ( c < 0x20 || c > 0x7f ) {
+	if ( c < 0x20 || (unsigned char)c > 0x7f ) {
 		puts("\nOOPS: panic: cputc: attempt to print non-ASCII character\n");
 		asm("cli;hlt");
 	}
