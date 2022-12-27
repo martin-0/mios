@@ -6,6 +6,8 @@
 // XXX: I should maybe get rid of func32 functions. While they operate on 32b regs
 // XXX:	I can't address mem > 0xffff with them.
 
+// XXX: writting to com0 port blindly without an option not to
+
 	.set TABSPACE,	4
 
 .section .text
@@ -25,6 +27,7 @@ puts16:
 	pushw %si
 	pushw %bx
 
+	xorw %dx, %dx			/* com0 */
         xorw %bx, %bx
 	movw %ax, %si			/* ds:si  string to print */
 0:
@@ -34,6 +37,11 @@ puts16:
 
         mov $0x0e, %ah			/* int 0x10, AH=0Eh: teletype output */
         int $0x10
+
+	.ifdef SERIAL
+		call write_com0
+	.endif
+
         jmp 0b
 1:
 	popw %bx
@@ -41,6 +49,7 @@ puts16:
         ret
 .endfunc
 
+// NOTE: not used anywhere
 /* void putsn16(char* ptr, uint16_t n)
  *
  * printf first n chars of the ptr 
@@ -104,6 +113,10 @@ printf16:
 .Ltab_print:
 	movw $0x0e20,%ax
         int $0x10
+	.ifdef SERIAL
+		call write_com0		/* %al: char to print */
+	.endif
+
 	loop .Ltab_print
 	jmp .Lbigloop
 
@@ -230,6 +243,10 @@ printf16:
 	movb $0x0e, %ah			/* print char */
 	addb $0x30, %al			/* ASCII code: 0x30+digit */
 	int $0x10
+
+	.ifdef SERIAL
+		call write_com0
+	.endif
 	pop %ax
 	pop %bx
 
@@ -277,6 +294,9 @@ printf16:
 .Lputc:
 	movb $0x0e,%ah
 	int $0x10
+	.ifdef SERIAL
+		call write_com0
+	.endif
 	jmp .Lbigloop
 
 .Lendprintf: 
@@ -331,6 +351,10 @@ printf16_helper_x:
 	addb $0x30, %al
 	movb $0x0e, %ah
 	int $0x10
+
+	.ifdef SERIAL
+		call write_com0
+	.endif
 	loop .Lhelpx_loop
 
 	pop %bx
@@ -1152,6 +1176,53 @@ diskinfo16:
 	ret
 .endfunc
 
+/* void init_com0(char port)
+ *
+ * port as expected by AH=00h, int $0x14 BIOS function
+*/
+.global init_com0
+.func init_com0
+init_com0:
+        xorw %dx, %dx
+	movb %al, %dl
+        movw $0xe3, %ax                                 /* port settings: 9600bps,8N1 */
+        int $0x14
+	ret
+.endfunc
+
+/* void write_com0(char c)
+ *
+ * Only al is use as a character to print.
+ * As printf16 relies on scratch registers it's easier just to pusha/popa here.
+*/
+.global write_com0
+.func write_com0
+write_com0:
+	pushaw
+	xorw %dx,%dx					/* com0 */
+	movw %ax, %si
+
+	movw $4096, %cx					/* tries before timeout */
+.Lwc0_poll:
+	movw $0x0003, %ax
+	int $0x14
+	testb $0x20, %ah
+	jz .Lwc0_nrdy					/* not ready */
+
+	movw %si, %ax					/* write character */
+	movb $1, %ah
+	int $0x14
+	jmp .Lwc0_end
+
+.Lwc0_nrdy:
+	outb %al, $0x80					/* dummy delay */
+	loop .Lwc0_poll
+
+.Lwc0_end:
+	popaw
+	ret
+.endfunc
+
 
 /* void farmemcpy(void far* dst, void far* src, uint16_t bytes)
  *
@@ -1467,6 +1538,9 @@ strtok32_r:
 .section .data
 	.align 2
 	__strtok_nextptr:		.word	0	/* used for internal tracking of str with strtok16() */
+
+	.global b_have_serial_com0
+	b_have_serial_com0:		.byte 0
 
 	/* GDT used during PM copy */
 	.align 8

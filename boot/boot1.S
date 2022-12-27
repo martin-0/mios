@@ -46,6 +46,11 @@ _start:
 	movw $BOOT1_STACK_SP, %sp
 
 	movw %dx, (w_bp_bootdrive)			/* save bootdrive */
+
+	.ifdef SERIAL					/* serial port output was requested */
+		call init_com0
+	.endif
+
 	movw $(msg_boot1), %ax
 	call puts16
 
@@ -628,5 +633,3 @@ panic16:
 		dbgmsg_dow_leftovers:	.asciz	"doing w_leftovers\r\n"
 		dbgmsg_leftovers_stats:	.asciz	"%d leftovers need %d %d-sectors to read\r\n"
 	.endif
-
-	debug666:	.asciz	"/debugme"	
