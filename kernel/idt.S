@@ -6,12 +6,12 @@
 .global	__irq_setframe_early
 .func __irq_setframe_early
 __irq_setframe_early:
-	pushl $0				// IDT 0x20-0x2f will have entries to these push entries
+	pushl $0				// IDT 0x20-0x2f will have entries to these, start at push instrucion
 	jmp irq_dispatch
-	pushl $1
-	jmp irq_dispatch
-	pushl $2
-	jmp irq_dispatch
+	pushl $1				// XXX:
+	jmp irq_dispatch			// this works because pushl0/jmp to irq_dispatch is close enough for short jump
+	pushl $2				// while there's no need for anything else here it is a problem for traps
+	jmp irq_dispatch			// maybe I should use one generic approach here
 	pushl $3
 	jmp irq_dispatch
 	pushl $4
@@ -42,8 +42,7 @@ __irq_setframe_early:
 
 .global irq_dispatch
 irq_dispatch:
-	//pushl (%esp)				/* irqnr;  paddding so trapframe and irqframe are the same */
-	pushl $0x666
+	pushl (%esp)				/* irqnr;  paddding so trapframe and irqframe are the same */
 	pushw	%gs
 	pushw	%fs
 	pushw	%es
@@ -90,33 +89,28 @@ irq_cleanup:
 
 /* handy macro to ease the setup */
 .macro trap_set_frame_early n e
+	.global trap_setframe_early\n
+	trap_setframe_early\n:				/* trap_setframe_earlyN */
 
-	// XXX: this was done so that each trap handler is the same bytes apart and I can offset it easily
-	//	in setup_idt.
-	//	I CAN'T TOUCH EAX YET!. And if I save it I'm messing up the frame.
-	//	I need to come up with better idea how to build this up. I don't want to go back to the original
-	//	idea of setting up an array of trap_setframe_earlyN entries but I might need to :|
-
-	//.global trap_setframe_early\n
-	//trap_setframe_early\n:			/* trap_setframe_earlyN */
-	movl $(trap_dispatch), %eax
-
-	.if \e == 0				/* if there's no error push 0 */
+	.if \e == 0					/* if there's no error push 0 */
 	pushl $0
 	.else
-		xchg %ax,%ax			/* 2-byte nop */
+		xchg %ax,%ax				/* 2-byte nop */
 	.endif
-	pushl $\n				/* push trapnr */
-	//jmp trap_dispatch			/* continue with the trap handling */
+	pushl $\n					/* push trapnr */
+
+	pushl %eax					/* save eax */
+	movl $(trap_dispatch), %eax
+	//jmp trap_dispatch				/* continue with the trap handling */
 	jmp *%eax
 
 .endm
 
 /*
 	Is that 2-byte nop in trap_set_frame_early macro ideal? I don't know yet. For the time being I'd like to
-	avoid creating separate table of pointers with the rap_setframe_earlyN that I'd use in init_idt() routine.
+	avoid creating separate table of pointers with the trap_setframe_earlyN that I'd use in init_idt() routine.
 	This introduces indirect jump too. Maybe not ideal, but I'll stick with it for the time being.. I can always
-	optimise. Each trap_set_frame_early stage is 11B apart.
+	optimise. Each trap_set_frame_early stage is 12B apart.
 */
 .global __trap_setframe_early
 .func __trap_setframe_early
@@ -156,6 +150,7 @@ __trap_setframe_early:
 
 .global trap_dispatch
 trap_dispatch:
+	popl %eax				// restore eax after jump
 	pushw	%gs
 	pushw	%fs
 	pushw	%es

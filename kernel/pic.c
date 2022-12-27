@@ -254,7 +254,8 @@ void init_idt() {
 	for (i =0 ; i < TRAP_ENTRIES_LOW; i++) {
 		setup_idt_entry(__trap_setframe_early+ofst, KERN_CS, i, IDT_GATE32_TRAP);
 		trap_handlers[i] = unused_trap_handler;
-		ofst += 11;	// each __trap_setframe_early trap is 11B apart in code
+		ofst += 12;	// each __trap_setframe_early trap is 12B apart in idt.S
+		// XXX: I should use some better method than this
 	}
 
 	// set all IRQ handlers to irq_handler_dflt
