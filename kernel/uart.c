@@ -18,8 +18,22 @@ uart_type_t uart_types[] = {
 uint32_t uart_common_speeds[UART_COMMON_SPEED_VALS] = { 50, 110, 220, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
 
 // XXX: dummy write test
-void inline dbg_uart_write(char c, int16_t base) {
-	outb_p(c, base + 0);
+void dbg_uart_write(char c, int16_t base) {
+	int16_t i;
+	uint8_t r;
+
+	for (i =0 ; i < 255; i++) {
+		r = inb(base + UART_REG_LSR);
+		if (r == 0xff) goto out;		// error
+
+		if ( (r & 0x20) ) {			// Empty Transmitter Holding Register
+			outb_p(c, base + 0);
+			goto out;
+		}
+		delay_p80();
+	}
+out:
+	asm volatile("nop");
 }
 
 void dbg_uart_show(uint16_t base) {
