@@ -42,13 +42,15 @@ __irq_setframe_early:
 
 .global irq_dispatch
 irq_dispatch:
-	movl (%esp), %esi			/* esi: irqnumber */
-	pushl %esi
+	//pushl (%esp)				/* irqnr;  paddding so trapframe and irqframe are the same */
+	pushl $0x666
 	pushw	%gs
 	pushw	%fs
 	pushw	%es
 	pushw	%ds
 	pushal
+
+	movl 0x2c(%esp), %esi			/* irq number */
 
 	/* Our stack is now as follows:
 		flags
@@ -88,6 +90,13 @@ irq_cleanup:
 
 /* handy macro to ease the setup */
 .macro trap_set_frame_early n e
+
+	// XXX: this was done so that each trap handler is the same bytes apart and I can offset it easily
+	//	in setup_idt.
+	//	I CAN'T TOUCH EAX YET!. And if I save it I'm messing up the frame.
+	//	I need to come up with better idea how to build this up. I don't want to go back to the original
+	//	idea of setting up an array of trap_setframe_earlyN entries but I might need to :|
+
 	//.global trap_setframe_early\n
 	//trap_setframe_early\n:			/* trap_setframe_earlyN */
 	movl $(trap_dispatch), %eax
