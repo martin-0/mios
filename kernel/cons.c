@@ -26,6 +26,7 @@ void puts(char* s) {
 
 void cputc(char c, char attrib) {
 	uint16_t i,t;
+
 	/* handle special cases of character */
 	switch (c) { 
 	case '\n':	
@@ -66,6 +67,12 @@ void cputc(char c, char attrib) {
 				dbg_uart_write('\r', com1_console);
 			}
 			goto exit;
+	}
+
+	// XXX: assert at least for now
+	if ( c < 0x20 || c > 0x7f ) {
+		puts("\nOOPS: panic: cputc: attempt to print non-ASCII character\n");
+		asm("cli;hlt");
 	}
 	
 	*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | c; 
