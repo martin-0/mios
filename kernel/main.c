@@ -18,11 +18,9 @@ extern uint64_t ticks;
 uint16_t com1_console;	// init in entry.S
 
 void kernel_main() {
-
+	uint8_t key;
 	printk("welcome to kernel_main\n");
 
-	//com1_console =0 ;
-	uint8_t key;
 	for (;; ) {
 		key = getc();
 		//printk("main: key: %x\n", key);
