@@ -35,8 +35,8 @@ void cputc(char c, char attrib) {
 			cursx =0;
 
 			if (com1_console) {
-				dbg_uart_write('\r', com1_console);
-				dbg_uart_write('\n', com1_console);
+				poll_uart_write('\r', com1_console);
+				poll_uart_write('\n', com1_console);
 			}
 
 			goto exit;
@@ -56,7 +56,7 @@ void cputc(char c, char attrib) {
 
 			if (com1_console) {
 				for (i =0; i < t; i++)
-					dbg_uart_write(' ', com1_console);
+					poll_uart_write(' ', com1_console);
 			}
 
 			goto exit;
@@ -64,7 +64,7 @@ void cputc(char c, char attrib) {
 	case '\r':	cursx = 0;
 
 			if (com1_console) {
-				dbg_uart_write('\r', com1_console);
+				poll_uart_write('\r', com1_console);
 			}
 			goto exit;
 	}
@@ -79,7 +79,7 @@ void cputc(char c, char attrib) {
 	cursx++;
 
 	if (com1_console) {
-		dbg_uart_write(c, com1_console);
+		poll_uart_write(c, com1_console);
 	}
 
 exit:

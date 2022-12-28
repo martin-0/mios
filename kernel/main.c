@@ -19,6 +19,7 @@ uint16_t com1_console;	// init in entry.S
 
 void kernel_main() {
 	uint8_t key;
+	uint32_t i =0;
 	printk("welcome to kernel_main\n");
 
 	for (;; ) {
@@ -27,8 +28,8 @@ void kernel_main() {
 		// test
 		switch(key) {
 		// A
-		case 0x1e:	//dbg_uart_show(COM1_BASE);
-				dbg_uart_write('A', COM1_BASE);
+		case 0x1e:
+				poll_uart_write('A', COM1_BASE);
 				break;
 		// S
 		case 0x1f:      check_irq_stats();
@@ -51,15 +52,12 @@ void kernel_main() {
 
 		}
 
-	/*
-	uint32_t i =0;
 		i++;
 		asm("hlt");
 		if ( i > 512 ) {
 			i= 0;
 			check_irq_stats();
 		}
-	*/
 	}
 
 }

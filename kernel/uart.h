@@ -43,10 +43,11 @@ typedef struct uart_type {
 } uart_type_t;
 
 uart_id_t uart_ident(uint16_t base);
-int early_uart_init(uint16_t base);
+int early_uart_init(uint16_t base, uint32_t speed);
 int uart_set_baud(uint16_t base, uint32_t speed);
 
-void dbg_uart_write(char c, int16_t base);
+void poll_uart_write(char c, int16_t base);
+
 void dbg_uart_show(uint16_t base);
 
 #endif /* ifndef HAVE_UART_H */

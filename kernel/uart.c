@@ -17,8 +17,7 @@ uart_type_t uart_types[] = {
 
 uint32_t uart_common_speeds[UART_COMMON_SPEED_VALS] = { 50, 110, 220, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
 
-// XXX: dummy write test
-void dbg_uart_write(char c, int16_t base) {
+void poll_uart_write(char c, int16_t base) {
 	int16_t i;
 	uint8_t r;
 
@@ -43,7 +42,7 @@ void dbg_uart_show(uint16_t base) {
 
 // XXX	let's assume there is serial port at base right now
 //	Disable FIFO, set 8N1 and try to negotiate as fast speed as possible
-int early_uart_init(uint16_t base) {
+int early_uart_init(uint16_t base, uint32_t speed) {
 	uart_id_t type;
 	int i,status;
 	uint8_t	r;
@@ -83,7 +82,8 @@ int early_uart_init(uint16_t base) {
 	}
 	printk("early_uart_init: speed set to %d\n", uart_common_speeds[i]);
 */
-	if ((uart_set_baud(base, 9600)) != 0) {
+
+	if ((uart_set_baud(base, speed)) != 0) {
 		return 1;
 	}
 
