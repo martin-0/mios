@@ -7,6 +7,11 @@
  * Once found its contents is loaded to the 07c00:0000 buffer. Its size can't be more than seven 64kB segments.
  * LBAs are treated as 32b numbers. Partition end has to fit within this range.
  *
+ * pMBR code doesn't print anything if all is OK. There are two ways to enable serial console: compile it with SERIAL or
+ * hold left shift during boot. One dot '.' is printed to indicate serial console is active.
+ *
+ * Due to lack of space error messages are just one letter words most of the time.
+ *
  */
 
 /*
@@ -44,7 +49,7 @@ _start:
 	 *
 	 */
 
-	movw $BOOT_SEG, %ax			/* rellocate to 0x7a:0000 */
+	movw $BOOT_SEG, %ax			/* rellocate to 0x7a0:0000 */
 	movw %ax, %ds
 	movw $RELOC_SEG, %bx
 	movw %bx, %es
@@ -61,7 +66,31 @@ _start:
 
 1:	
 	movw %bx, %ds				/* ds = RELOC_SEG */
+	pushw %dx				/* save boot drive */
 
+	/* just jump to init com0 if we explictly asked for it */
+	.ifdef SERIAL
+		jmp .Linit_com0
+	.endif
+
+	/* enable com0 if left shift is pressed */
+	movb $0x2, %ah				/* AH=02h, int 0x16: get shift flags */
+	int $0x16
+
+	testb $2, %al				/* bit2: left shift */
+	jz .Lcheck_bios_func
+
+.Linit_com0:
+	/* initialize com0 */
+        xorw %dx, %dx				/* com0 */
+        movw $0xe3, %ax				/* port settings: 9600bps,8N1 */
+	movw %ax, (w_com0_enabled)		/* we need nonzero value there; use ax to save bytes */
+        int $0x14
+
+	movw $(err_generic+10), %si		/* put a "." on serial console */
+	call puts16
+
+.Lcheck_bios_func:
 	/* http://www.ctyme.com/intr/rb-0706.htm
 	 * BIOS call: int 0x13: installation check
 	 *	params:
@@ -78,6 +107,8 @@ _start:
 	 *		CX = API subset support bitmap
 	 *		DH = extension version (v2.0+) 
 	 */
+
+	popw %dx				/* restore boot drive */
 	movb $0x41, %ah
 	movw $0x55aa, %bx
 	int $0x13
@@ -225,7 +256,6 @@ _start:
 	movw %ax, %ds
 	movw %ax, %es
 	movw $0xaa55, %ax
-
 	jmp $0, $0x7c00
 
 // ========================
@@ -287,6 +317,9 @@ do_read:
 puts16:
 	pushw %bx
 	xorw %bx, %bx
+	xorw %dx, %dx			/* prep for com0 */
+
+	movw (w_com0_enabled), %cx
 0:
 	lodsb
 	testb %al, %al
@@ -294,13 +327,20 @@ puts16:
 
 	mov $0x0e, %ah
 	int $0x10
+
+	jcxz 0b				/* no serial console if cx is 0 */
+
+	movb $0x01, %ah
+	int $0x14
 	jmp 0b
 1:
 	popw %bx
 	ret
 .endfunc
 
-	.align 4
+	w_com0_enabled:	.word	0
+	sector_size:	.word	0x200		/* reported sector size */
+
 	/* XXX: check how the signature is on big-endian systems */
 	mios_boot_disk_guid:
 		/* 736f696d-0001-0002-0003-feedcafef00d */
@@ -313,17 +353,17 @@ puts16:
 		.word 0,GPT_TABLE_SEG		/* adress to read 0x600:0000 */
 		.quad 1,0			/* LBA */
 	
-	sector_size:	.word	0x200		/* reported sector size */
 
 	gpt_hdr_signature:	.quad 0x5452415020494645
 
-	err_gpt_hdr:	.asciz	"No GPT header"
-	err_noext:	.asciz	"! BiosFunc"
-	err_noext2:	.asciz	"! DrvParm"
-	err_partial:	.ascii	"Partial "
-	err_generic:	.asciz	"read error."
-	err_nopart:	.asciz	"! Pa"
-	err_halted:	.asciz	"\r\nHalted.\r\n"
+	err_gpt_hdr:	.asciz	"G"	// no GPT header
+	err_noext:	.asciz	"B"	// error in BIOS function
+	err_noext2:	.asciz	"D"	// Drive parameter error
+	err_nopart:	.asciz	"P"	// partition not found
+	err_halted:	.asciz	"Hlt"	// Halted
+
+	err_partial:	.ascii	"Partial "	// read error during read
+	err_generic:	.asciz	"read error."	// '.' character here (err_generic+10) is used to indicate serial port is active
 
 	/* MBR partitions start here */
 	.= 0x1be
