@@ -4,15 +4,6 @@
 /*	Any address that is used here has to be < 0x10000 as I opted for all segments to be 0.
 	Additional checks should be done. Maybe all these checks can be in linker script.
 	Linker script will complain if I cross it anyway.
-
-
-	Kernel LOADADDR is set to 0x20000. There are two major limitations that are not addresses yet:
-		- size of the kernel: Qemu's first usable memory region ends @ 9fc00, so kernel bigger than ~511K is a problem.
-				Load addres for data is rounded on PAGE_SIZE so even less is usable.
-
-		- LOADADDR has to be < 1MB if I want to use standard BIOS read. I could opt for int 15/AH=87h to get up to ~16MB limit.
-			This is now in TODO.
-
 */
 
 .include "gboot.inc"
@@ -34,6 +25,8 @@ _start:
 
 	.asciz "MIOS"
 
+	// XXX: this is not needed. This bootcode is on GPT partition, there's no need to care about BPB ..
+	// XXX: to be removed
 	.= _start + 0x3e				/* offset to bootcode after BPB */
 1:
 	/* setup the segment registers */
@@ -49,8 +42,24 @@ _start:
 
 	.ifdef SERIAL					/* serial port output was requested */
 		call init_com0
+		jmp .Lbootmsg
 	.endif
 
+	/* same as with pMBR force serial console if left shift is enabled. */
+
+	// XXX: TODO: it's easy to add .ifdef in current printf implementation but it will mess up
+	//	few things if i start to check if console is enabled ..
+        movb $0x2, %ah					/* AH=02h, int 0x16: get shift flags */
+        int $0x16
+
+	testb $2, %al					/* bit2: left shift */
+	jz .Lbootmsg
+
+	movw $(msg_serial_rq), %ax
+	call puts16
+	call init_com0
+
+.Lbootmsg:
 	movw $(msg_boot1), %ax
 	call puts16
 
@@ -604,6 +613,7 @@ panic16:
 	end_gdt:
 
 	msg_boot1:	.asciz	">MIOS boot1\r\n"
+	msg_serial_rq:	.asciz	"On demand request to enable serial port\r\n"
 	strkernel:	.asciz	"/boot/kernel"
 
 	fatal_error:	.asciz	"FATAL ERROR: system halted.\r\n"
