@@ -1,7 +1,6 @@
 obj/*
 keep/*
 *.swp
-mios
 disk00.raw*
 tests/disk00*
 tests/debugme
