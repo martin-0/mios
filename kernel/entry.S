@@ -29,7 +29,7 @@ _kernel_entry:
 		maybe I should rename it to early_init or something
 	*/
 
-	movl 9600, %edx				/* speed when testing on actual HW */
+	movl $9600, %edx			/* speed when testing on actual HW */
 	movw $0x3f8, %ax
 	call early_uart_init
 	testw %ax, %ax
