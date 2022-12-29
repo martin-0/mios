@@ -88,6 +88,7 @@ int uart_set_baud(uint16_t base, uint32_t speed) {
 		printk("uart_set_baud: %x: failed to set speed: %d\n", base,speed);
 		return 1;
 	}
+
 	return 0;
 }
 

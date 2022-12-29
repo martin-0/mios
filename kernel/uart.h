@@ -21,6 +21,9 @@
 #define	UART_REG_LSR		5	// line status register (read)
 					// NOTE: write is undef
 
+#define	UART_REG_MSR		6	// modem status register (read)
+					// NOTE: write is undef
+
 #define	UART_REG_SR		7	// scratch register (read/write)
 
 #define	MASK_LSR_DATA_READY		0x1
@@ -73,6 +76,7 @@ typedef struct uart_port {
 	uart_id_t id;
 	uint16_t base;
 	uint32_t speed;
+	char irq;
 	int flags;
 } uart_port_t;
 
