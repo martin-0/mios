@@ -27,6 +27,7 @@ pmbr:
 	make -C boot/pmbr
 
 tools:
+	mkdir $(OBJDIR)
 	make -C tools
 
 disk:
