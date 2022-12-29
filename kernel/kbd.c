@@ -24,10 +24,8 @@
 
 /* let's try something simple first..*/
 typedef struct kbd_state {
-	#define	KBD_MAX_BUF	32
-	#define	KBD_MAX_IDX	(KBD_MAX_BUF-1)
-	uint8_t kbuf[KBD_MAX_BUF];
-	uint8_t cursize;
+	unsigned char shift_flags;
+	unsigned char led_state;
 } kbd_state_t;
 
 kbd_state_t kbd;
@@ -46,6 +44,11 @@ static inline int8_t kbd_get_data() {
 void __init_kbd_module() {
 	// set the proper ISR for irq1 and enable it
 	memset((char*)&kbd, 0, sizeof(struct kbd_state));
+
+	// TODO: LED states should be set to a known state probably
+	//	 identify keyboard ?
+
+
 	set_interrupt_handler(kbd_handler, 1);
 	clear_irq(1);
 }
@@ -55,16 +58,8 @@ void kbd_handler(__attribute__((unused)) struct trapframe* f) {
 
         uint8_t scancode = kbd_get_data();
 
-	/*
-	printk("%x ", scancode);
-
-	printk("kbd: cursize: %d\n", kbd.cursize);
-	if (kbd.cursize >= KBD_MAX_IDX) {
-		printk("kbd: WARNING: buffer full, not buffering..\n");
-	} else {
-		kbd.kbuf[kbd.cursize++] = scancode;
-	}
-	*/
+	// XXX: I need to figure out how I'm going to deal with this. handler should only update kbd state machine, but that's it
+	// 	Yes, main right now waits in loop for some key press but that should behave as a shell of sort..
 
 	lastc = scancode;
 
