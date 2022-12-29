@@ -23,8 +23,33 @@
 
 #define	UART_REG_SR		7	// scratch register (read/write)
 
-#define	MASK_LCR_DLAB		0x80
-#define MASK_DISABLE_LCR_DLAB	~(MASK_LCR_DLAB)
+#define	MASK_LSR_DATA_READY		0x1
+#define	MASK_LSR_OVERRUN_ERR		0x2
+#define	MASK_LSR_PARITY_ERR		0x4
+#define	MASK_LSR_FRAMING_ERR		0x8
+#define	MASK_LSR_BREAK_IRQ		0x10
+#define	MASK_LSR_EMPTY_THR		0x20
+#define	MASK_LSR_EMPTY_DHR		0x40
+#define	MASK_LSR_ERROR_RCV_FIFO		0x80
+
+// Line Control Register settings
+#define	MASK_LCR_PARITY_NONE		0x0
+#define	MASK_LCR_PARITY_ODD		0x8
+#define	MASK_LCR_PARITY_EVEN		0x18
+#define	MASK_LCR_PARITY_MARK		0x28
+#define	MASK_LCR_PARITY_SPACE		0x38
+#define	MASK_LCR_ONE_STOPBIT		0
+#define	MASK_LCR_ONEHALF_TWO		4
+#define	MASK_LCR_WORDSZ_5		0
+#define	MASK_LCR_WORDSZ_6		1
+#define	MASK_LCR_WORDSZ_7		2
+#define	MASK_LCR_WORDSZ_8		3
+
+#define	MASK_LCR_BREAK_ENABLE		0x40
+#define	MASK_LCR_DLAB			0x80
+#define MASK_DISABLE_LCR_DLAB		~(MASK_LCR_DLAB)
+
+#define	POLL_WRITE_RETRIES	2048	// assume write failed after these attempts
 
 typedef enum uart_id {
 	unknown = 0,
@@ -42,12 +67,19 @@ typedef struct uart_type {
 	char* desc;
 } uart_type_t;
 
+// XXX: I should maybe thing about common device descriptors .. but it's probably way to soon for this
+// XXX: unused right now
+typedef struct uart_port {
+	uart_id_t id;
+	uint16_t base;
+	uint32_t speed;
+	int flags;
+} uart_port_t;
+
 uart_id_t uart_ident(uint16_t base);
 int early_uart_init(uint16_t base, uint32_t speed);
 int uart_set_baud(uint16_t base, uint32_t speed);
 
-void poll_uart_write(char c, int16_t base);
-
-void dbg_uart_show(uint16_t base);
+int poll_uart_write(char c, int16_t base);
 
 #endif /* ifndef HAVE_UART_H */
