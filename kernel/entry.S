@@ -15,28 +15,26 @@ _kernel_entry:
 	movw %ax, %gs
 
 	/* argument passed to entry used to initialize smap entries in mm.c */
-	movl (%esp), %eax
-	movl %eax, (smap)
+	movl (%esp), %edi			/* save arguments */
 
 	movl $ADDR_STACKSTART, %esp
 
-	xorl %eax, %eax
-	movw %ax, (com1_console)		/* default off */
-
 	call clrscr
 
-	/* XXX: problem with this approach is we don't have IDT set yet. init_uart can't set serial vectors here
-		maybe I should rename it to early_init or something
-	*/
+	movw 8(%edi), %ax
+	testw %ax, %ax
+	jz .Lke_idt
 
 	movl $9600, %edx			/* speed when testing on actual HW */
 	movw $0x3f8, %ax
 	call early_uart_init
 	testw %ax, %ax
-	jnz 1f					/* if init failed com1_console stays 0 */
-	movw $0x3f8, (com1_console)
+	jnz .Lke_idt				/* if init failed com1_console stays 0 */
+	movw $0x3f8, %ax
+	movw %ax, 8(%edi)
+	movw %ax, (com1_console)		/* needs to be initialized for printk to print on comconsole */
 
-1:
+.Lke_idt:
 
 	// XXX: installs all handlers, sets to default (even irq0,1..)
 	call init_idt				/* setup the tables */
@@ -52,6 +50,7 @@ _kernel_entry:
 
 	sti 					/* enable interrupts */
 
+	movl %edi, %eax				/* kargs */
 	call kernel_main
 	jmp off					/* in case of I return from kernel_main */
 

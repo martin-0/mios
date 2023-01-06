@@ -9,7 +9,8 @@
 #include "mm.h"
 #include "libsa.h"
 
-/* smap variable gets initialied in entry.S. This entry points to the boot1 smap table */
+/* This entry points to the boot1 smap table. Passed in kargs to kernel */
+/* XXX: we should copy or initialize this again to keep it above 1M mem */
 e820_map_t* smap;
 
 char* e820_mem_types[5] = {

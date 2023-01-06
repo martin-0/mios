@@ -20,13 +20,14 @@ LDFLAGS=-T ../kernel/kernlink.ld --defsym LINKADDR=$(LINKADDR)
 # https://elixir.bootlin.com/linux/v4.20.17/source/arch/x86/Makefile
 CFLAGS=-m32 -march=i386 -g -Os -ffreestanding -fomit-frame-pointer -fno-stack-protector -Wall -Wextra -mpreferred-stack-boundary=4 -mregparm=3
 CFLAGS+=-I$(INCDIR) -DDEBUG -DDEBUG_TRAP -DDEBUG_PM
+CFLAGS+=-DDEBUG
 #CFLAGS+=-DDEBUG_IRQ -DDEBUG_TRAP
 
 SRCO= entry.o main.o cons.o pic.o idt.o mm.o kbd.o uart.o libsa.o
 
 all: kernel
 
-kernel:	$(SRCO)
+kernel:	$(SRCO) kernel.h
 	cd $(OBJDIR) && $(LD) $(LDFLAGS) -o kernel $(SRCO)
 
 entry.o: entry.S
