@@ -18,4 +18,22 @@ struct kernel_args {
 	uint16_t comconsole;
 } __attribute__((packed));
 
+
+// GDT table
+struct gdt_entry {
+	uint16_t	ge_limit_low;
+	uint16_t	ge_base_low;
+	uint8_t		ge_base_mid;
+	uint8_t		ge_access;
+	uint8_t		ge_rtl;
+	uint8_t		ge_base_hi;
+} __attribute__((packed)) __attribute__((aligned (4)));
+
+struct gdt {
+	uint16_t g_size;
+	struct gdt_entry* g_start;
+} __attribute__((packed));
+
+static void load_gdt();
+
 #endif /* ifndef HAVE_KERNEL_H */
