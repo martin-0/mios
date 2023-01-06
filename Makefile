@@ -9,10 +9,12 @@ BLOCKSIZE=1024
 
 OBJDIR=obj
 
-.PHONY: tools
-all= tools mios
+.PHONY: prep tools
 
-mios:	pmbr tools
+all=tools mios
+
+
+mios:	prep pmbr tools
 	make -C kernel
 	make -C boot
 	make copy
@@ -27,8 +29,10 @@ pmbr:
 	make -C boot/pmbr
 
 tools:
-	mkdir $(OBJDIR)
 	make -C tools
+
+prep:
+	mkdir -p $(OBJDIR)
 
 disk:
 	rm -f $(DISK_RAW)
