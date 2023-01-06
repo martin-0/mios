@@ -26,7 +26,7 @@ _start:
 	.asciz "MIOS"
 
 	// XXX: this is not needed. This bootcode is on GPT partition, there's no need to care about BPB ..
-	// XXX: to be removed
+	// XXX: remove ?
 	.= _start + 0x3e				/* offset to bootcode after BPB */
 1:
 	/* setup the segment registers */
@@ -40,24 +40,39 @@ _start:
 
 	movw %dx, (w_bp_bootdrive)			/* save bootdrive */
 
+	/* same as with pMBR force serial console if left shift is enabled. */
+
+	/* timeout in putc() for serial console can be a bit annoying if conosle is not connected.
+		The same way I can force SERIAL with LSHIFT I'll use LCTRL to disable it alltogether even if SERIAL is enabled
+	*/
+
+        movb $0x2, %ah					/* AH=02h, int 0x16: get shift flags */
+        int $0x16
+
+	testb $4, %al					/* bit2: ctrl (left or right) */
+	jnz .Lserial_disabled
+
+	/* serial console overwrite was not requested, enable serial console if SERIAL is defined */
 	.ifdef SERIAL					/* serial port output was requested */
+		movw $1, (comconsole)
 		call init_com0
 		jmp .Lbootmsg
 	.endif
 
-	/* same as with pMBR force serial console if left shift is enabled. */
-
-	// XXX: TODO: it's easy to add .ifdef in current printf implementation but it will mess up
-	//	few things if i start to check if console is enabled ..
-        movb $0x2, %ah					/* AH=02h, int 0x16: get shift flags */
-        int $0x16
-
-	testb $2, %al					/* bit2: left shift */
+	testb $2, %al					/* bit1: left shift */
 	jz .Lbootmsg
 
+	movw $2, (comconsole)
 	movw $(msg_serial_rq), %ax
 	call puts16
 	call init_com0
+	jmp .Lbootmsg
+
+.Lserial_disabled:
+	xorw %ax,%ax
+	movw %ax,(comconsole)
+	movw $(msg_serial_off), %ax
+	call puts16
 
 .Lbootmsg:
 	movw $(msg_boot1), %ax
@@ -346,7 +361,8 @@ _start:
         orl $1, %eax
         movl %eax, %cr0
 
-	pushl $(smap)					/* argument to entry */
+	//pushl $(smap)					/* argument to entry */
+	pushl $(kernel_args)
         ljmpl $8, $ADDR_KERNEL_ENTRY			/* flush instruction cache and set the proper cs selector */
 
 	jmp .Lb1_haltme
@@ -419,9 +435,9 @@ search_uuid_buf:
 	movw %cx, %di					/* save cx */
 
 	movw $16, %cx
-	movw $(linux_ext2_uuid), %dx
+	movw $(fs_ext2_uuid), %dx
 	movw %si, %ax
-	call memcmp16					/* memcmp16(partuuid, linux_ext2_uuid, 16) */
+	call memcmp16					/* memcmp16(partuuid, fs_ext2_uuid, 16) */
 	movw %di, %cx					/* restore cx */
 
 	test %ax, %ax					/* partition found */
@@ -523,7 +539,7 @@ panic16:
 	.align 8
 
 	gpt_hdr_signature:      .quad 0x5452415020494645
-	linux_ext2_uuid:	.byte 0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47, 0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4
+	fs_ext2_uuid:		.byte 0xaf, 0x3d, 0xc6, 0x0f, 0x83, 0x84, 0x72, 0x47, 0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4
 
 	.align 8
         lba_dap:
@@ -545,6 +561,7 @@ panic16:
 	smap_data:
 		.zero 1536                              /* actual data, 24*64 = 1536 */
 
+
 	boot_partition:
 		q_bp_lba_start:		.quad 0		/* start LBA of the partition */
 		q_bp_lba_end:		.quad 0		/* end LBA of the partition */
@@ -561,6 +578,13 @@ panic16:
 	w_sectors_in_buf:		.word 0		/* buffer size in sectors */
 	w_rounds:			.word 0		/* how many full passes i can make when reading partitions */
 	w_leftovers:			.word 0		/* leftover partitons to read */
+
+	.align 4
+	kernel_args:
+		l_smap_ptr:		.long smap
+		l_boot_part_ptr:	.long boot_partition
+		.global comconsole
+		comconsole:		.word 0
 
 	/* GDT table definiion */
 	.align 16
@@ -614,6 +638,8 @@ panic16:
 
 	msg_boot1:	.asciz	">MIOS boot1\r\n"
 	msg_serial_rq:	.asciz	"On demand request to enable serial port\r\n"
+	msg_serial_off:	.asciz	"On demand request to disable serial port\r\n"
+
 	strkernel:	.asciz	"/boot/kernel"
 
 	fatal_error:	.asciz	"FATAL ERROR: system halted.\r\n"

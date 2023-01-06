@@ -28,6 +28,8 @@ puts16:
 	xorw %dx, %dx			/* com0 */
         xorw %bx, %bx
 	movw %ax, %si			/* ds:si  string to print */
+
+	movw (comconsole), %cx
 0:
         lodsb
         testb %al, %al
@@ -36,38 +38,10 @@ puts16:
         mov $0x0e, %ah			/* int 0x10, AH=0Eh: teletype output */
         int $0x10
 
-	.ifdef SERIAL
-		call write_com0
-	.endif
-
+	jcxz 0b				/* no serial console */
+	call write_com0			/* send byte to a com0 */
         jmp 0b
 1:
-	popw %bx
-        popw %si
-        ret
-.endfunc
-
-// NOTE: not used anywhere
-/* void putsn16(char* ptr, uint16_t n)
- *
- * printf first n chars of the ptr 
-*/
-.global putsn16
-.func putsn16
-putsn16:
-	pushw %si
-	pushw %bx
-
-        xorw %bx, %bx
-	movw %ax, %si			/* ds:si  string to print */
-	movw %dx, %cx			/* n */
-0:
-        lodsb
-
-        mov $0x0e, %ah			/* int 0x10, AH=0Eh: teletype output */
-        int $0x10
-        loop 0b
-
 	popw %bx
         popw %si
         ret
@@ -112,9 +86,12 @@ printf16:
 	movw $0x0e20,%ax
         int $0x10
 
-	.ifdef SERIAL
-		call write_com0		/* %al: char to print */
-	.endif
+	pushw %ax
+	movw (comconsole), %ax
+	testw %ax,%ax
+	popw %ax
+	jz .Ltab_print
+	call write_com0			/* %al: char to print */
 
 	loop .Ltab_print
 	jmp .Lbigloop
@@ -243,9 +220,14 @@ printf16:
 	addb $0x30, %al			/* ASCII code: 0x30+digit */
 	int $0x10
 
-	.ifdef SERIAL
-		call write_com0
-	.endif
+	pushw %ax
+	movw (comconsole), %ax
+	testw %ax,%ax
+	popw %ax
+	jz 1f
+	call write_com0
+
+1:
 	pop %ax
 	pop %bx
 
@@ -294,9 +276,12 @@ printf16:
 	movb $0x0e,%ah
 	int $0x10
 
-	.ifdef SERIAL
-		call write_com0
-	.endif
+	pushw %ax
+	movw (comconsole), %ax
+	testw %ax,%ax
+	popw %ax
+	jz .Lbigloop
+	call write_com0
 	jmp .Lbigloop
 
 .Lendprintf: 
@@ -352,10 +337,15 @@ printf16_helper_x:
 	movb $0x0e, %ah
 	int $0x10
 
-	.ifdef SERIAL
-		call write_com0
-	.endif
+	pushw %ax
+	movw (comconsole), %ax
+	testw %ax,%ax
+	popw %ax
+	jz .Lhelpx_comcons
 
+	call write_com0
+
+.Lhelpx_comcons:
 	loop .Lhelpx_loop
 
 	pop %bx
