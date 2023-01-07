@@ -1,5 +1,7 @@
 /* martin */
 
+// XXX: ss is not saved ! : need to fix this
+
 .section .text
 	.code32
 
