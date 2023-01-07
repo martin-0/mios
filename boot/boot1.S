@@ -40,6 +40,8 @@ _start:
 
 	movw %dx, (w_bp_bootdrive)			/* save bootdrive */
 
+	call init_hooks					/* replace ISRs with one from hooks.S; mostly for debugging purposes */
+
 	/* same as with pMBR force serial console if left shift is enabled. */
 
 	/* timeout in putc() for serial console can be a bit annoying if conosle is not connected.
