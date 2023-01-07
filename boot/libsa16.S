@@ -90,9 +90,11 @@ printf16:
 	movw (comconsole), %ax
 	testw %ax,%ax
 	popw %ax
-	jz .Ltab_print
+	jz .Ltab_print.1
+
 	call write_com0			/* %al: char to print */
 
+.Ltab_print.1:
 	loop .Ltab_print
 	jmp .Lbigloop
 
