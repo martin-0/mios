@@ -1,9 +1,5 @@
 /* martin */
 
-/* XXX: Idea here is to load the kernel and let it do all the work.
-	As I'm learning though I'm abusing the gboot to test other stuff too.
-*/
-
 #include <stdint.h>
 #include <stdarg.h>
 
@@ -38,10 +34,9 @@ void kernel_main(struct kernel_args* kargs) {
 
 	load_gdt();
 
+	asm volatile("cpuid");
 
 	printk("welcome to kernel_main\n");
-	printk("console: 0x%x\n", com1_console);
-
 	for (;; ) {
 		key = getc();
 		//printk("main: key: %x\n", key);
