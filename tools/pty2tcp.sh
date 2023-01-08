@@ -1,1 +1,1 @@
-socat TCP4-LISTEN:1101,reuseaddr unix-connect:/tmp/serial0
+socat TCP4-LISTEN:1101,reuseaddr,fork unix-connect:/tmp/serial0
