@@ -1,5 +1,6 @@
 obj/*
 keep/*
+docs/*
 *.swp
 disk00.raw*
 tests/disk00*
