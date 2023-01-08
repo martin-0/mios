@@ -21,7 +21,7 @@ _kernel_entry:
 
 	call clrscr
 
-	movw 8(%edi), %ax
+	movw 8(%edi), %ax			/* comconsole */
 	testw %ax, %ax
 	jz .Lke_idt
 

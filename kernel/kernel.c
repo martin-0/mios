@@ -23,7 +23,10 @@ struct gdt_entry gdt_entries[] = {
 	{ 0xffff,0,0,0x92, 0xcf, 0 },	// kernel data
 };
 
-struct gdt GDT = { .g_size = sizeof(gdt_entries)-1, .g_start = (struct gdt_entry*)&gdt_entries};
+struct gdt GDT = {
+	.g_size = sizeof(gdt_entries)-1,
+	.g_start = (struct gdt_entry*)&gdt_entries
+};
 
 
 void kernel_main(struct kernel_args* kargs) {
@@ -34,9 +37,14 @@ void kernel_main(struct kernel_args* kargs) {
 
 	load_gdt();
 
-	asm volatile("cpuid");
+	if ((uart_init(0x3f8, 9600)) != 0) {
+		printk("failed to init com0\n");
+	}
 
 	printk("welcome to kernel_main\n");
+
+	debug_status_8259("main");
+
 	for (;; ) {
 		key = getc();
 		//printk("main: key: %x\n", key);
@@ -51,7 +59,7 @@ void kernel_main(struct kernel_args* kargs) {
 				break;
 
 		// I
-		case 0x17:      debug_status_8259("irq1_handler");
+		case 0x17:      debug_status_8259("main");
 				break;
 
 		// K
@@ -67,14 +75,13 @@ void kernel_main(struct kernel_args* kargs) {
 
 		}
 
-	/*
 		i++;
 		asm("hlt");
-		if ( i > 512 ) {
+		if ( i > 2048 ) {
 			i= 0;
 			check_irq_stats();
+			debug_status_8259("main");
 		}
-	*/
 	}
 
 }

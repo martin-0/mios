@@ -1,6 +1,7 @@
 #include "uart.h"
 #include "asm.h"
 #include "libsa.h"
+#include "pic.h"
 
 uart_type_t uart_types[] = {
 	{ unknown, "unknown" },
@@ -15,6 +16,7 @@ uart_type_t uart_types[] = {
 
 #define	UART_COMMON_SPEED_VALS		13
 
+// XXX: do we need this?
 uint32_t uart_common_speeds[UART_COMMON_SPEED_VALS] = { 50, 110, 220, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
 
 int poll_uart_write(char c, int16_t base) {
@@ -60,6 +62,58 @@ int early_uart_init(uint16_t base, uint32_t speed) {
 
 	printk("early_uart_init: com0: %s,0x%x,%dbps,8N1\n", uart_types[type].desc, base, speed);
 	return 0;
+}
+
+// XXX: same as early_uart_init(), let's assume there is com0 at irq4
+// XXX: can I mix polled send and interrupt driven recv ?
+int uart_init(uint16_t base, uint32_t speed) {
+
+	// 8N1
+	outb_p(MASK_LCR_WORDSZ_8|MASK_LCR_ONE_STOPBIT|MASK_LCR_PARITY_NONE, base + UART_REG_LCR);
+
+	// disable FIFO
+	outb_p(0, base + UART_REG_FCR);
+
+	// negotiate speed again
+	if ((uart_set_baud(base, speed)) != 0) {
+		return 1;
+	}
+
+	// enable receiving data interrupt
+	outb_p(1, base + UART_REG_IER);
+
+	set_interrupt_handler(&uart_isr_handler, 4);
+	clear_irq(4);
+	return 0;
+}
+
+// note: we assigned this function to com0, hence base is 0x3f8
+// XXX: other serial devices could trigger irq4, assuming com0 for now
+void uart_isr_handler(__attribute__((unused)) struct trapframe* f) {
+	printk("%s: hi\n", __func__);
+	uint8_t r;
+
+	r = inb(0x3f8 + UART_REG_IIR);
+	printk("IRR: %x\n", r);
+
+	// XXX: in this test case we are expecting to be triggered only by com1/irq4
+	// 	with only received data interrupt enabled we should receive 4 only
+	switch(r) {
+	case 2:
+		r = inb(0x3f8+UART_REG_IIR);
+		break;
+
+	case 4:
+		r = inb(0x3f8+UART_REG_RBR);
+		break;
+	default:
+		printk("%s: IIR: %x\n", __func__, r);
+		goto out;
+	}
+	printk("%s: %x\n", __func__, r);
+
+out:
+	send_8259_EOI(4);
 }
 
 int uart_set_baud(uint16_t base, uint32_t speed) {

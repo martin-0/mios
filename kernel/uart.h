@@ -86,4 +86,9 @@ int uart_set_baud(uint16_t base, uint32_t speed);
 
 int poll_uart_write(char c, int16_t base);
 
+int uart_init(uint16_t base, uint32_t speed);
+
+#include "pic.h"
+void uart_isr_handler(struct trapframe* f);
+
 #endif /* ifndef HAVE_UART_H */
