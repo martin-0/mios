@@ -49,7 +49,7 @@ controller:
 #define	KBDE_DATA_READY(s)		(s & MASK_KBDC_STATUS_OUTBUF)
 #define	KBDE_WRITE_READY(s)		(!(s & MASK_KBDC_STATUS_INBUF))			// input buffer is 0: ready
 
-#define	KBD_POLL_TRIES	8
+#define	KBD_POLL_TRIES	2048
 
 /* let's try something simple first..*/
 typedef struct kbd_state {
@@ -142,6 +142,7 @@ int __init_kbd_module() {
 
 	memset((char*)&kbd, 0, sizeof(struct kbd_state));
 
+/*
 	printk("test of PS/2 controller\n");
 
 	// check for controller
@@ -179,7 +180,6 @@ int __init_kbd_module() {
 		printk("echo keyboard test passed.\n");
 	}
 
-/*
 	if ((kbdc_write_command(0x20)) == -1) {
 		printk("%s: failed to send command 0x20\n", __func__);
 		return -1;
