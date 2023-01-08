@@ -101,10 +101,12 @@ static inline int8_t read_8259(uint8_t ctrl) {
 }
 
 void init_8259(void) {
+	// All ISA IRQs should be edge triggered
+	//	https://forum.osdev.org/viewtopic.php?t=23774
 
 	// ICW1: send INIT to PICs
-	outb(0x11, MASTER_PIC_COMMAND);
-	outb(0x11, SLAVE_PIC_COMMAND);
+	outb(ICW1_INIT_PIC|ICW1_USE_ICW4|ICW1_EDGE_TRIGGERED_MODE, MASTER_PIC_COMMAND);
+	outb(ICW1_INIT_PIC|ICW1_USE_ICW4|ICW1_EDGE_TRIGGERED_MODE, SLAVE_PIC_COMMAND);
 	delay_p80();
 
 	// ICW2: actual remapping of IRQs
@@ -116,10 +118,10 @@ void init_8259(void) {
 	outb(4, MASTER_PIC_DATA);				// 2nd bit - IRQ2 goes to slave
 	outb(2, SLAVE_PIC_COMMAND);				// bit notation: 010: master IRQ to slave
 	delay_p80();
-	
+
 	// ICW4: x86 mode
-	outb(1, MASTER_PIC_DATA);
-	outb(1, SLAVE_PIC_COMMAND);
+	outb(ICW4_MODE_x86, MASTER_PIC_DATA);
+	outb(ICW4_MODE_x86, SLAVE_PIC_COMMAND);
 	delay_p80();
 
 	// on slave disable all IRQs

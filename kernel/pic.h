@@ -19,11 +19,24 @@
 
 // OCW1 - read from DATA port
 
+// options to set in ICW1 word; bits 5-7 should be always 0 on x86
+#define ICW1_USE_ICW4                   1
+#define ICW1_SINGLE_PIC                 2
+#define ICW1_EDGE_TRIGGERED_MODE        0
+#define ICW1_LEVEL_TRIGGERED_MODE       8
+#define ICW1_INIT_PIC                   16
+
+#define	OCW2_EOI			0x20
+
 // OCW3 uses COMMAND port (A0 is 0)
 #define	OCW3_RQ_IRR			0x0a
 #define	OCW3_RQ_ISR			0x0b
 
-#define	OCW2_EOI			0x20
+#define ICW4_MODE_x86           1
+#define ICW4_MODE_AUTO_EOI      2
+#define ICW4_MODE_BUF_MASTER    4
+#define ICW4_MODE_BUFFERED      8
+#define ICW4_MODE_NESTED        16
 
 /* PIT 825x */
 #define	PIT_MODE_CMD_REG		0x43		/* write only */
