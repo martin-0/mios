@@ -249,8 +249,6 @@ void init_idt() {
 		printk("init_idt: __trap_setframe_early: %p, dispatch: %p\n", __trap_setframe_early, trap_dispatch);
 	#endif
 
-	printk("__trap_setframe_early: %p\n", __trap_setframe_early);
-
 	// handler for traps 0 - TRAP_ENTRIES_LOW
 	ofst = 0;
 	for (i =0 ; i < TRAP_ENTRIES_LOW; i++) {
@@ -279,8 +277,7 @@ void init_idt() {
 
 	// XXX: set only to test if int $0x80 will cause this trap11
 	trap_handlers[11] = dummy_int11_handler;
-	printk("init_idt: int11_handler: %p\n", dummy_int11_handler);
-
+	//printk("init_idt: int11_handler: %p\n", dummy_int11_handler);
 
 	#ifdef DEBUG_IRQ
 		debug_status_8259("init_idt");
