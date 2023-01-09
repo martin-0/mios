@@ -33,6 +33,7 @@ struct gdt GDT = {
 void kernel_main(struct kernel_args* __kargs) {
 	uint8_t r,r2,key;
 	uint32_t i =0;
+	char buf[128];
 
 	copy_kargs(__kargs);
 
@@ -51,8 +52,15 @@ void kernel_main(struct kernel_args* __kargs) {
 
 	i = 0;
 	for (;; ) {
-		key = getc();
+		printk("mios> ");
 
+		// XXX: kbd still needs to translate scan codes
+		read_string(buf, 32);
+
+		printk(": %s\n", buf);
+
+	/*
+		key = getc();
 		switch(key) {
 		// A
 		case 0x1e:
@@ -88,7 +96,6 @@ void kernel_main(struct kernel_args* __kargs) {
 
 		}
 		i++;
-	/*
 		asm("hlt");
 		if ( i > 2048 ) {
 			i=0;

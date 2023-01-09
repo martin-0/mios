@@ -1,5 +1,6 @@
-#include "gshell.h"
+#include <stddef.h>
 
+#include "gshell.h"
 #include "kbd.h"
 #include "uart.h"
 
@@ -26,4 +27,29 @@ int getc() {
 	}
 out:
 	return c;	
+}
+
+// XXX: one by one reading into str
+// read string up to n chars
+int read_string(char* buf, size_t n) {
+	char c;
+	size_t i = 0;
+
+	while(i < n) {
+		c = getc();
+
+		if (c == 0xa) {
+			*(buf+i) = 0;
+			goto out;
+		}
+		*(buf+i) = c;
+		i++;
+	}
+
+	// unlikely event of n being 0
+	if (!n) return 0;
+
+	*(buf+i-1) = 0;
+out:
+	return i;
 }
