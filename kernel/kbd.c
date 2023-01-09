@@ -206,11 +206,11 @@ int __init_kbd_module() {
 
 // handler exits to the irq_cleanup code
 void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
-	printk("%s: attempting to get data\n", __func__);
+	//printk("%s: attempting to get data\n", __func__);
 
 	uint8_t scancode = kbde_read();
 
-	printk("%s: scancode: %x\n", __func__, scancode);
+	//printk("%s: scancode: %x\n", __func__, scancode);
 
 	// XXX: I need to figure out how I'm going to deal with this. handler should only update kbd state machine, but that's it
 	// 	Yes, main right now waits in loop for some key press but that should behave as a shell of sort..

@@ -30,15 +30,15 @@ struct gdt GDT = {
 
 
 void kernel_main(struct kernel_args* kargs) {
-	uint8_t key;
+	uint8_t r,r2,key;
 	uint32_t i =0;
 
 	smap = (e820_map_t *)kargs->smap_ptr;
 
 	load_gdt();
 
-	if ((uart_init(0x3f8, 9600)) != 0) {
-		printk("failed to init com0\n");
+	if ((uart_init(COM1_BASE, 9600)) != 0) {
+		printk("failed to init com0 @ %x\n", COM1_BASE);
 	}
 
 	printk("welcome to kernel_main\n");
@@ -56,6 +56,10 @@ void kernel_main(struct kernel_args* kargs) {
 				break;
 		// S
 		case 0x1f:      check_irq_stats();
+				r = inb_p(COM1_BASE + UART_REG_MCR);
+				r2 = inb_p(COM1_BASE + UART_REG_MSR);
+
+				printk("0x%x: MCR: 0x%x, MSR: 0x%x\n", COM1_BASE, r, r2);
 				break;
 
 		// I
@@ -76,12 +80,14 @@ void kernel_main(struct kernel_args* kargs) {
 		}
 
 		i++;
+	/*
 		asm("hlt");
 		if ( i > 2048 ) {
-			i= 0;
+			i=0;
 			check_irq_stats();
 			debug_status_8259("main");
 		}
+	*/
 	}
 
 }
