@@ -14,6 +14,9 @@ uart_type_t uart_types[] = {
 	{ i16750, "16750" }
 };
 
+// XXX: without locking this is not ok .. but for the sake of test
+extern volatile int lastc;
+
 #define	UART_COMMON_SPEED_VALS		13
 
 uint8_t uart_get_lsr(uint16_t base) {

@@ -55,6 +55,7 @@ void kernel_main(struct kernel_args* kargs) {
 				poll_uart_write('A', COM1_BASE);
 				break;
 		// S
+		case 0x73:
 		case 0x1f:      check_irq_stats();
 				r = inb_p(COM1_BASE + UART_REG_MCR);
 				r2 = inb_p(COM1_BASE + UART_REG_MSR);
@@ -63,22 +64,25 @@ void kernel_main(struct kernel_args* kargs) {
 				break;
 
 		// I
+		case 0x69:
 		case 0x17:      debug_status_8259("main");
 				break;
 
 		// K
+		case 0x6b:
 		case 0x25:      asm("int $0x80");
 				break;
 		// N
+		case 0x6e:
 		case 0x31:      __asm__ ("int $2");
 				break;
 
 		// M
+		case 0x6d:
 		case 0x32:      show_e820map();
 				break;
 
 		}
-
 		i++;
 	/*
 		asm("hlt");

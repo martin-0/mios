@@ -222,5 +222,7 @@ void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
 
 // XXX i know, i know .. but for the time being my focus is on uart, so i'll let it be
 uint8_t getc() {
-	return lastc;
+	int r = lastc;
+	lastc = 0;
+	return r;
 }
