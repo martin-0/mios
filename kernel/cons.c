@@ -62,7 +62,6 @@ void cputc(char c, char attrib) {
 			goto exit;
 
 	case '\r':	cursx = 0;
-
 			if (com1_console) {
 				poll_uart_write('\r', com1_console);
 			}
