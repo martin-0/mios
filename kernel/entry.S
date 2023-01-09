@@ -23,15 +23,15 @@ _kernel_entry:
 
 	movw 8(%edi), %ax			/* comconsole */
 	testw %ax, %ax
-	jz .Lke_idt
+	jz .Lke_idt				/* skip if comconsole was not requested */
 
 	movl $9600, %edx			/* speed when testing on actual HW */
-	movw $0x3f8, %ax
+						/* ax: comconsole */
 	call early_uart_init
 	testw %ax, %ax
 	jnz .Lke_idt				/* if init failed com1_console stays 0 */
-	movw $0x3f8, %ax
-	movw %ax, 8(%edi)
+
+	movw 8(%edi), %ax
 	movw %ax, (com1_console)		/* needs to be initialized for printk to print on comconsole */
 
 .Lke_idt:

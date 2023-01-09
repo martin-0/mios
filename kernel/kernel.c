@@ -4,17 +4,19 @@
 #include <stdarg.h>
 
 #include "kernel.h"
-#include "libsa.h"
+#include "libk.h"
 #include "pic.h"
 #include "mm.h"
 #include "kbd.h"
 #include "uart.h"
+#include "gshell.h"
 
 extern uint64_t ticks;
-extern e820_map_t* smap;
+extern e820_map_t* smap;		// XXX: this map is still below 1M
 
 uint16_t com1_console;	// init in entry.S
 
+struct kernel_args kargs;
 
 // NOTE: userspace selectors to be defined here ..
 struct gdt_entry gdt_entries[] = {
@@ -28,14 +30,18 @@ struct gdt GDT = {
 	.g_start = (struct gdt_entry*)&gdt_entries
 };
 
-
-void kernel_main(struct kernel_args* kargs) {
+void kernel_main(struct kernel_args* __kargs) {
 	uint8_t r,r2,key;
 	uint32_t i =0;
 
-	smap = (e820_map_t *)kargs->smap_ptr;
+	copy_kargs(__kargs);
 
+	smap = (e820_map_t *)kargs.smap_ptr;
 	load_gdt();
+
+	for (i =0; i < BDA_COM_PORTS; i++) {
+		printk("com%d: 0x%x\n", i, kargs.com_ports[i]);
+	}
 
 	if ((uart_init(COM1_BASE, 9600)) != 0) {
 		printk("failed to init com0 @ %x\n", COM1_BASE);
@@ -43,12 +49,10 @@ void kernel_main(struct kernel_args* kargs) {
 
 	printk("welcome to kernel_main\n");
 
-	debug_status_8259("main");
-
+	i = 0;
 	for (;; ) {
 		key = getc();
-		//printk("main: key: %x\n", key);
-		// test
+
 		switch(key) {
 		// A
 		case 0x1e:
@@ -94,6 +98,11 @@ void kernel_main(struct kernel_args* kargs) {
 	*/
 	}
 
+}
+
+// copy kernel args from bootloader into kernel ones
+static void copy_kargs(struct kernel_args* k) {
+	memcpy(&kargs, k, sizeof(*k));
 }
 
 void load_gdt() {

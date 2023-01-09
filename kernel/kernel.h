@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define	BDA_COM_PORTS		4			// BDA: 40:00h - 40:08h
+
 // information coming from bootloader
 struct boot_partition {
 	uint64_t lba_start;
@@ -16,6 +18,7 @@ struct kernel_args {
 	uint32_t* smap_ptr;
 	struct boot_part* bootp;
 	uint16_t comconsole;
+	uint16_t com_ports[BDA_COM_PORTS];
 } __attribute__((packed));
 
 
@@ -35,5 +38,6 @@ struct gdt {
 } __attribute__((packed));
 
 static void load_gdt();
+static void copy_kargs(struct kernel_args* k);
 
 #endif /* ifndef HAVE_KERNEL_H */

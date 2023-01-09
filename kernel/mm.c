@@ -7,7 +7,7 @@
 */
 
 #include "mm.h"
-#include "libsa.h"
+#include "libk.h"
 
 /* This entry points to the boot1 smap table. Passed in kargs to kernel */
 /* XXX: we should copy or initialize this again to keep it above 1M mem */

@@ -2,8 +2,7 @@
 
 #include "asm.h"
 #include "cons.h"
-#include "libsa.h"
-
+#include "libk.h"
 #include "uart.h"
 
 extern uint16_t com1_console;

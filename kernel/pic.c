@@ -22,7 +22,7 @@
 #include "pic.h"
 
 #if defined(DEBUG) || defined(DEBUG_IRQ)
-	#include "libsa.h"
+	#include "libk.h"
 #endif
 
 interrupt_desc_t idt_entries[IDT_ENTRIES];			// IDT entries

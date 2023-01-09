@@ -1,9 +1,7 @@
-/* martin */
-
 #include <stdint.h>
 #include <stdarg.h>
 
-#include "libsa.h"
+#include "libk.h"
 #include "cons.h"
 #include "uart.h"
 
@@ -213,10 +211,18 @@ void dump_memory(uint32_t* addr, uint32_t size) {
 	putc('\n');
 }
 
-char* memset(char* str, int c, uint32_t size) {
-	uint32_t i;
-	for(i =0; i < size; i++) {
-		*(str+i) = (char)c;
+char* memset(void* str, int c, size_t n) {
+	size_t i;
+	for(i = 0; i < n; i++) {
+		*((char*)str+i) = c;
 	}
 	return str;
+}
+
+void* memcpy(void* dst, const void* src, size_t n) {
+	size_t i;
+	for (i=0; i < n; i++) {
+		*((char*)dst+i) = *((char*)src+i);
+	}
+	return dst;
 }

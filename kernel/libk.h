@@ -1,7 +1,8 @@
-/* martin */
+#ifndef HAVE_LIBK_H
+#define HAVE_LIBK_H
 
-#ifndef HAVE_LIBSA_H
-#define HAVE_LIBSA_H
+#include <stdint.h>
+#include <stddef.h>
 
 #ifndef NULL
 	#define	NULL	(void*)0
@@ -45,7 +46,7 @@ void helper_printk_u(uint32_t nr, char lz);
 
 void dump_memory(uint32_t* addr, uint32_t size);
 
-char* memset(char* str, int c, uint32_t size);
+char* memset(void* dst, int c, size_t n);
+void* memcpy(void* dst, const void* src, size_t n);
 
-
-#endif /* ifndef HAVE_LIBSA_H */
+#endif /* ifndef HAVE_LIBK_H */
