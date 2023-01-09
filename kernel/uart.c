@@ -16,6 +16,10 @@ uart_type_t uart_types[] = {
 
 #define	UART_COMMON_SPEED_VALS		13
 
+uint8_t uart_get_lsr(uint16_t base) {
+	return inb_p(base + UART_REG_LSR);
+}
+
 // XXX: do we need this?
 uint32_t uart_common_speeds[UART_COMMON_SPEED_VALS] = { 50, 110, 220, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200 };
 
@@ -42,6 +46,7 @@ out:
 int early_uart_init(uint16_t base, uint32_t speed) {
 	uart_id_t type;
 
+	// XXX: we should pay attention to MSR too
 	if ((type = uart_ident(base)) == unknown) {
 		printk("early_uart_init: 0x%x: unknown uart type\n", base);
 		return 1;
@@ -66,7 +71,9 @@ int early_uart_init(uint16_t base, uint32_t speed) {
 
 // XXX: same as early_uart_init(), let's assume there is com0 at irq4
 // XXX: can I mix polled send and interrupt driven recv ?
+// XXX: we should pay attention to MSR too
 int uart_init(uint16_t base, uint32_t speed) {
+	int8_t r;
 
 	// 8N1
 	outb_p(MASK_LCR_WORDSZ_8|MASK_LCR_ONE_STOPBIT|MASK_LCR_PARITY_NONE, base + UART_REG_LCR);
@@ -79,8 +86,17 @@ int uart_init(uint16_t base, uint32_t speed) {
 		return 1;
 	}
 
+	r = inb(base + UART_REG_MCR );
+	printk("%s: current MCR: 0x%x\n", __func__, r);
+
+	outb_p(UART_MCR_OUT2, base + UART_REG_MCR);
+
 	// enable receiving data interrupt
 	outb_p(1, base + UART_REG_IER);
+
+        #ifdef DEBUG
+        printk("%s: about to enable irq4\n", __func__);
+        #endif
 
 	set_interrupt_handler(&uart_isr_handler, 4);
 	clear_irq(4);
@@ -100,17 +116,19 @@ void uart_isr_handler(__attribute__((unused)) struct trapframe* f) {
 	// 	with only received data interrupt enabled we should receive 4 only
 	switch(r) {
 	case 2:
-		r = inb(0x3f8+UART_REG_IIR);
+		r = inb_p(0x3f8+UART_REG_IIR);
+		printk("%s: IIR: 0x%x\n", __func__, r);
 		break;
 
 	case 4:
-		r = inb(0x3f8+UART_REG_RBR);
+		r = inb_p(0x3f8+UART_REG_RBR);
+		printk("%s: RBR: 0x%x\n", __func__, r);
 		break;
 	default:
-		printk("%s: IIR: %x\n", __func__, r);
+		printk("oops: %s: IIR: %x\n", __func__, r);
+		asm volatile ("hlt");
 		goto out;
 	}
-	printk("%s: %x\n", __func__, r);
 
 out:
 	send_8259_EOI(4);

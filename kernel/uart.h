@@ -18,6 +18,8 @@
 
 #define	UART_REG_LCR		3	// line control register (read/write)
 
+#define	UART_REG_MCR		4	// modem control register (read/write)
+
 #define	UART_REG_LSR		5	// line status register (read)
 					// NOTE: write is undef
 
@@ -25,6 +27,12 @@
 					// NOTE: write is undef
 
 #define	UART_REG_SR		7	// scratch register (read/write)
+
+
+#define	UART_MCR_OUT2		8	// aux output 2, needs to be toggled to enable interrupts
+
+// XXX: I should not call these "MASK", they are toggles .. I'd expect mask to be ~OPTION..
+//	need to rewrite this
 
 #define	MASK_LSR_DATA_READY		0x1
 #define	MASK_LSR_OVERRUN_ERR		0x2
@@ -83,6 +91,7 @@ typedef struct uart_port {
 uart_id_t uart_ident(uint16_t base);
 int early_uart_init(uint16_t base, uint32_t speed);
 int uart_set_baud(uint16_t base, uint32_t speed);
+uint8_t uart_get_lsr(uint16_t base);
 
 int poll_uart_write(char c, int16_t base);
 

@@ -316,7 +316,8 @@ void debug_status_8259(char* caller) {
 
 void check_irq_stats(void) {
 	uint32_t i;
-	for (i =0 ; i < 16; i++) {
+	//XXX: # for now disable all# for (i =0 ; i < 16; i++) {
+	for (i =0 ; i < 5; i++) {
 		printk("irq%d: %llx\n", i, irq_stats[i]);
 	}
 }
