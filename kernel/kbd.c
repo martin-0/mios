@@ -1,7 +1,7 @@
 #include "kbd.h"
 #include "asm.h"
 #include "pic.h"
-#include "libsa.h"
+#include "libk.h"
 
 /* I/O port
 
@@ -51,15 +51,7 @@ controller:
 
 #define	KBD_POLL_TRIES	2048
 
-/* let's try something simple first..*/
-typedef struct kbd_state {
-	unsigned char shift_flags;
-	unsigned char led_state;
-} kbd_state_t;
-
 kbd_state_t kbd;
-
-volatile int lastc;
 
 // read port 0x60; used in ISR where we know there is data available
 static inline int8_t kbde_read() {
@@ -138,11 +130,9 @@ int8_t kbdc_write_command(uint8_t cmd) {
 
 /* installs the kbd handler and enable irq1 */
 int __init_kbd_module() {
-	uint8_t c, e;
-
-	memset((char*)&kbd, 0, sizeof(struct kbd_state));
-
+	memset((void*)&kbd, 0, sizeof(struct kbd_state));
 /*
+	uint8_t c, e;
 	printk("test of PS/2 controller\n");
 
 	// check for controller
@@ -210,19 +200,8 @@ void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
 
 	uint8_t scancode = kbde_read();
 
-	//printk("%s: scancode: %x\n", __func__, scancode);
-
-	// XXX: I need to figure out how I'm going to deal with this. handler should only update kbd state machine, but that's it
-	// 	Yes, main right now waits in loop for some key press but that should behave as a shell of sort..
-
-	lastc = scancode;
+	kbd.key = scancode;
+	kbd.flags = 1;		// ready for input
 
 	send_8259_EOI(1);
-}
-
-// XXX i know, i know .. but for the time being my focus is on uart, so i'll let it be
-uint8_t getc() {
-	int r = lastc;
-	lastc = 0;
-	return r;
 }
