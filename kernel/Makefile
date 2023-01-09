@@ -23,11 +23,11 @@ CFLAGS+=-I$(INCDIR) -DDEBUG -DDEBUG_TRAP -DDEBUG_PM
 CFLAGS+=-DDEBUG
 #CFLAGS+=-DDEBUG_IRQ -DDEBUG_TRAP
 
-SRCO= entry.o kernel.o cons.o pic.o idt.o mm.o kbd.o uart.o libsa.o
+SRCO= entry.o kernel.o cons.o pic.o idt.o mm.o kbd.o uart.o libk.o gshell.o
 
 all: kernel
 
-kernel:	$(SRCO) kernel.h
+kernel:	$(SRCO) kernel.h libk.h pic.h mm.h kbd.h uart.h gshell.h
 	cd $(OBJDIR) && $(LD) $(LDFLAGS) -o kernel $(SRCO)
 
 entry.o: entry.S
@@ -42,8 +42,8 @@ idt.o: idt.S
 cons.o:	cons.c cons.h
 	$(CC) $(CFLAGS) cons.c -c -o $(OBJDIR)/cons.o
 
-libsa.o: libsa.c libsa.h
-	$(CC) $(CFLAGS) libsa.c -c -o $(OBJDIR)/libsa.o
+libk.o: libk.c libk.h
+	$(CC) $(CFLAGS) libk.c -c -o $(OBJDIR)/libk.o
 
 pic.o: pic.c pic.h 
 	$(CC) $(CFLAGS) pic.c -c -o $(OBJDIR)/pic.o
@@ -56,6 +56,10 @@ kbd.o: kbd.c kbd.h
 
 uart.o: uart.c uart.h
 	$(CC) $(CFLAGS) uart.c -c -o $(OBJDIR)/uart.o
+
+gshell.o: gshell.c gshell.h
+	$(CC) $(CFLAGS) gshell.c -c -o $(OBJDIR)/gshell.o
+
 
 clean:
 	cd $(OBJDIR) && rm -f $(SRCO) kernel
