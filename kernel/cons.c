@@ -67,10 +67,10 @@ void cputc(char c, char attrib) {
 			goto exit;
 	}
 
-	// XXX: assert at least for now
+	// XXX: warning at least for now
 	if ( c < 0x20 || (unsigned char)c > 0x7f ) {
-		puts("\nOOPS: panic: cputc: attempt to print non-ASCII character\n");
-		asm("cli;hlt");
+		puts("\nWARNING: cputc: attempt to print non-ASCII character\n");
+		//asm("cli;hlt");
 	}
 	
 	*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | c; 
