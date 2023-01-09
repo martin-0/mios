@@ -56,7 +56,8 @@ _start:
 
 	/* serial console overwrite was not requested, enable serial console if SERIAL is defined */
 	.ifdef SERIAL					/* serial port output was requested */
-		movw $1, (comconsole)
+		movw (0x400), %ax			/* BDA com0 base */
+		movw %ax, (comconsole)
 		call init_com0
 		jmp .Lbootmsg
 	.endif
@@ -64,9 +65,14 @@ _start:
 	testb $2, %al					/* bit1: left shift */
 	jz .Lbootmsg
 
-	movw $2, (comconsole)
-	movw $(msg_serial_rq), %ax
-	call puts16
+	movw (0x400), %ax				/* BDA com0 base */
+	movw %ax, (comconsole)
+
+	pushw %ax
+	pushw $(msg_serial_rq)
+	call printf16
+	addw $6, %sp
+
 	call init_com0
 	jmp .Lbootmsg
 
@@ -351,6 +357,12 @@ _start:
 	testw %ax,%ax
 	jnz .Lb1_haltme
 
+	/* copy UART ports com1-com4 from BDA to kargs */
+	movl (0x400), %eax
+	movl %eax, (w_uart_ports)
+	movl (0x404), %eax
+	movl %eax, (w_uart_ports+4)
+
 	pushl $ADDR_KERNEL_ENTRY			/* show where the kernel is being loaded */
 	pushw $(msg_jmp_kern)
 	call printf16
@@ -587,6 +599,7 @@ panic16:
 		l_boot_part_ptr:	.long boot_partition
 		.global comconsole
 		comconsole:		.word 0
+		w_uart_ports:		.word 0,0,0,0
 
 	/* GDT table definiion */
 	.align 16
@@ -639,7 +652,7 @@ panic16:
 	end_gdt:
 
 	msg_boot1:	.asciz	">MIOS boot1\r\n"
-	msg_serial_rq:	.asciz	"On demand request to enable serial port\r\n"
+	msg_serial_rq:	.asciz	"On demand request to enable serial port 0x%x\r\n"
 	msg_serial_off:	.asciz	"On demand request to disable serial port\r\n"
 
 	strkernel:	.asciz	"/boot/kernel"
