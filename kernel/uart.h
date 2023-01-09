@@ -85,8 +85,12 @@ typedef struct uart_port {
 	uint16_t base;
 	uint32_t speed;
 	char irq;
-	int flags;
 } uart_port_t;
+
+typedef struct uart_state {
+	volatile char byte;              // very simple one byte buffer
+	int flags;
+} uart_state_t;
 
 uart_id_t uart_ident(uint16_t base);
 int early_uart_init(uint16_t base, uint32_t speed);

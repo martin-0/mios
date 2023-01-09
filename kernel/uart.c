@@ -1,6 +1,6 @@
 #include "uart.h"
 #include "asm.h"
-#include "libsa.h"
+#include "libk.h"
 #include "pic.h"
 
 uart_type_t uart_types[] = {
@@ -14,10 +14,9 @@ uart_type_t uart_types[] = {
 	{ i16750, "16750" }
 };
 
-// XXX: without locking this is not ok .. but for the sake of test
-extern volatile int lastc;
-
 #define	UART_COMMON_SPEED_VALS		13
+
+uart_state_t com0_state;
 
 uint8_t uart_get_lsr(uint16_t base) {
 	return inb_p(base + UART_REG_LSR);
@@ -97,6 +96,8 @@ int uart_init(uint16_t base, uint32_t speed) {
 	// enable receiving data interrupt
 	outb_p(1, base + UART_REG_IER);
 
+	memset((char*)&com0_state, 0, sizeof(com0_state));
+
         #ifdef DEBUG
         printk("%s: about to enable irq4\n", __func__);
         #endif
@@ -109,23 +110,27 @@ int uart_init(uint16_t base, uint32_t speed) {
 // note: we assigned this function to com0, hence base is 0x3f8
 // XXX: other serial devices could trigger irq4, assuming com0 for now
 void uart_isr_handler(__attribute__((unused)) struct trapframe* f) {
-	printk("%s: hi\n", __func__);
+	//printk("%s: hi\n", __func__);
 	uint8_t r;
 
 	r = inb(0x3f8 + UART_REG_IIR);
-	printk("IRR: %x\n", r);
+	//printk("IRR: %x\n", r);
 
 	// XXX: in this test case we are expecting to be triggered only by com1/irq4
 	// 	with only received data interrupt enabled we should receive 4 only
 	switch(r) {
 	case 2:
 		r = inb_p(0x3f8+UART_REG_IIR);
-		printk("%s: IIR: 0x%x\n", __func__, r);
+		//printk("%s: IIR: 0x%x\n", __func__, r);
 		break;
 
 	case 4:
 		r = inb_p(0x3f8+UART_REG_RBR);
-		printk("%s: RBR: 0x%x\n", __func__, r);
+
+		com0_state.byte = r;
+		com0_state.flags = 1;
+
+		//printk("%s: RBR: 0x%x\n", __func__, r);
 		break;
 	default:
 		printk("oops: %s: IIR: %x\n", __func__, r);
