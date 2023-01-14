@@ -77,6 +77,11 @@ int early_uart_init(uint16_t base, uint32_t speed) {
 int uart_init(uint16_t base, uint32_t speed) {
 	int8_t r;
 
+	r = inb(base + UART_REG_MCR );
+	printk("%s: current MCR: 0x%x\n", __func__, r);
+	r |= UART_MCR_OUT2;
+	outb_p(r, base + UART_REG_MCR);
+
 	// 8N1
 	outb_p(MASK_LCR_WORDSZ_8|MASK_LCR_ONE_STOPBIT|MASK_LCR_PARITY_NONE, base + UART_REG_LCR);
 
@@ -87,11 +92,6 @@ int uart_init(uint16_t base, uint32_t speed) {
 	if ((uart_set_baud(base, speed)) != 0) {
 		return 1;
 	}
-
-	r = inb(base + UART_REG_MCR );
-	printk("%s: current MCR: 0x%x\n", __func__, r);
-
-	outb_p(UART_MCR_OUT2, base + UART_REG_MCR);
 
 	// enable receiving data interrupt
 	outb_p(1, base + UART_REG_IER);
@@ -130,7 +130,7 @@ void uart_isr_handler(__attribute__((unused)) struct trapframe* f) {
 		com0_state.byte = r;
 		com0_state.flags = 1;
 
-		//printk("%s: RBR: 0x%x\n", __func__, r);
+		//printk("%s: 0x%x\n", __func__, r);
 		break;
 	default:
 		printk("oops: %s: IIR: %x\n", __func__, r);
