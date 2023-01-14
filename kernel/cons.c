@@ -5,6 +5,8 @@
 #include "libk.h"
 #include "uart.h"
 
+#define putc(c) cputc(c, DEFAULT_CHAR_ATTRIB)
+
 extern uint16_t com1_console;
 
 uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;		// XXX: probably not needed as global variable .. 
@@ -67,11 +69,13 @@ void cputc(char c, char attrib) {
 			goto exit;
 	}
 
+	/*
 	// XXX: warning at least for now
 	if ( c < 0x20 || (unsigned char)c > 0x7f ) {
 		puts("\nWARNING: cputc: attempt to print non-ASCII character\n");
 		//asm("cli;hlt");
 	}
+	*/
 	
 	*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | c; 
 	cursx++;

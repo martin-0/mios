@@ -56,7 +56,7 @@ kbd.o: kbd.c kbd.h
 uart.o: uart.c uart.h
 	$(CC) $(CFLAGS) uart.c -c -o $(OBJDIR)/uart.o
 
-gshell.o: gshell.c gshell.h
+gshell.o: gshell.c gshell.h kbd.h uart.h libk.h cons.h
 	$(CC) $(CFLAGS) gshell.c -c -o $(OBJDIR)/gshell.o
 
 

@@ -22,7 +22,6 @@ void scroll();
 void setcursor();
 void puts(char* s);
 void cputc(char c, char attrib);
-uint8_t getc();
 
 #define putc(c)	cputc(c, DEFAULT_CHAR_ATTRIB)
 

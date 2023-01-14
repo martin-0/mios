@@ -31,7 +31,7 @@ struct gdt GDT = {
 };
 
 void kernel_main(struct kernel_args* __kargs) {
-	uint8_t r,r2,key;
+	uint8_t r,r2;
 	uint32_t i =0;
 	char buf[128];
 
@@ -44,11 +44,14 @@ void kernel_main(struct kernel_args* __kargs) {
 		printk("com%d: 0x%x\n", i, kargs.com_ports[i]);
 	}
 
+	printk("welcome to kernel_main\n");
+
 	if ((uart_init(COM1_BASE, 9600)) != 0) {
 		printk("failed to init com0 @ %x\n", COM1_BASE);
+	} else {
+		printk("serial console: 0x%x\n", com1_console);
 	}
 
-	printk("welcome to kernel_main\n");
 
 	i = 0;
 	for (;; ) {
@@ -56,8 +59,7 @@ void kernel_main(struct kernel_args* __kargs) {
 
 		// XXX: kbd still needs to translate scan codes
 		read_string(buf, 32);
-
-		printk(": %s\n", buf);
+		printk("%d: %s\n", i,buf);
 
 	/*
 		key = getc();
@@ -95,14 +97,19 @@ void kernel_main(struct kernel_args* __kargs) {
 				break;
 
 		}
+	*/
 		i++;
-		asm("hlt");
-		if ( i > 2048 ) {
+		//asm("hlt");
+		if ( i > 4) {
 			i=0;
 			check_irq_stats();
 			debug_status_8259("main");
+
+			r = inb_p(COM1_BASE + UART_REG_MCR);
+			r2 = inb_p(COM1_BASE + UART_REG_MSR);
+			printk("0x%x: MCR: 0x%x, MSR: 0x%x\n", COM1_BASE, r, r2);
+
 		}
-	*/
 	}
 
 }
