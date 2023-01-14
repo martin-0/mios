@@ -3,70 +3,46 @@
 #include "pic.h"
 #include "libk.h"
 
-/* I/O port
-
-http://www-ug.eecg.toronto.edu/msl/nios_devices/datasheets/PS2%20Keyboard%20Protocol.htm
-
-	0x60	write	data sent directly to keyboard/aux device
-	0x60	read	data from 8042
-	0x64	write	8042 commands
-	0x64	read	8042 satus register
-
-	0x60	R/W	data port		encoder
-	0x64	R	status register		controller
-	0x64	W	command register	controller
-
-
-controller:
-    A one-byte input buffer - contains byte read from keyboard; read-only		- read input buffer  0x60
-    A one-byte output buffer - contains byte to-be-written to keyboard; write-only	- write output buffer 0x60
-    A one-byte status register - 8 status flags; read-only				- read status reg 0x64
-    A one-byte control register - 7 control flags; read/write 				- need to use cmd to do that
-
-
-*/
-
-#define	KBDE_DATA_PORT			0x60
-#define	KBDC_READ_STATUS_PORT		0x64
-#define	KBDC_WRITE_COMMAND_PORT		0x64
-
-#define	MASK_KBDC_STATUS_OUTBUF		0x1		// from ctrl to CPU
-#define	MASK_KBDC_STATUS_INBUF		0x2		// from CPU to ctrl
-#define	MASK_KBDC_SYSTEM_FLAG		0x4
-#define	MASK_KBDC_COMMAND_DATA		0x8
-#define	MASK_KBDC_LOCKED		0x10
-#define	MASK_KBDC_AUX_BUF_FULL		0x20
-#define	MASK_KBDC_TIMEOUT		0x40
-#define	MASK_KBDC_PARITY_ERR		0x80
-
-#define	KBDC_CMD_PS2_CTRL_TEST		0xAA
-#define	KBDC_CMD_PS2_PORT1_TEST		0xAB
-#define	KBDC_CMD_READ_CTRL_OUTPUT	0xD0
-
-#define	KBDE_CMD_ECHO			0xEE
-
-
 #define	KBDE_DATA_READY(s)		(s & MASK_KBDC_STATUS_OUTBUF)
 #define	KBDE_WRITE_READY(s)		(!(s & MASK_KBDC_STATUS_INBUF))			// input buffer is 0: ready
 
-#define	KBD_POLL_TRIES	2048
+#define	KBD_POLL_TRIES			2048
+
+/* known keyboard device types */
+#define	KBD_DEVICE_TYPES		14
+struct kbd_devtype_name	kbd_device_type[KBD_DEVICE_TYPES] = {
+	{ 0x0000, "unknown keyboard" },
+	{ 0xff00, "AT keyboard" },		// 1 byte id
+	{ 0xff03, "Standard PS/2 mouse" },	// 1 byte id
+	{ 0xff04, "5-button mouse"},		// 1 byte id
+	{ 0x41ab, "MF2 keyboard" },
+	{ 0x83ab, "MF2 keyboard" },
+	{ 0xc1ab, "MF2 keyboard" },
+	{ 0x84ab, "IBM ThinkPads or alike"},
+	{ 0x85ab, "NCD N-97 keyboard/122-key host connected keyboard"},
+	{ 0x86ab, "122-key keyboard" },
+	{ 0x90ab, "Japanese \"G\" keyboards"},
+	{ 0x91ab, "Japanese \"P\" keyboards"},
+	{ 0x92ab, "Japanese \"A\" keyboards"},
+	{ 0xa1ac, "NCD Sun layout keyboard"}
+};
 
 kbd_state_t kbd;
 
 // read port 0x60; used in ISR where we know there is data available
-static inline int8_t kbde_read() {
+static inline uint8_t kbde_read() {
 	return inb(KBDE_DATA_PORT);
 }
 
 // read port 0x64
-static inline int8_t kbdc_read_status() {
+static inline uint8_t kbdc_read_status() {
 	return inb(KBDC_READ_STATUS_PORT);
 }
 
 // read port 0x60 when expecting answer to a cmd
-int8_t kbde_read_data() {
-	int i;
+int kbde_read_data() {
 	uint8_t s;
+	int i;
 
 	for (i =0; i < KBD_POLL_TRIES; i++) {
 		s = kbdc_read_status();
@@ -87,10 +63,10 @@ int8_t kbde_read_data() {
 	return -1;
 }
 
-// write port 0x60
-int8_t kbde_write_command(uint8_t cmd) {
-	int i;
+// writes to port 0x60
+int kbde_write_command(uint8_t cmd) {
 	uint8_t s;
+	int i;
 
 	for (i=0; i < KBD_POLL_TRIES; i++) {
 		s = kbdc_read_status();
@@ -107,10 +83,23 @@ int8_t kbde_write_command(uint8_t cmd) {
 	return -1;
 }
 
-// write to port 0x64
-int8_t kbdc_write_command(uint8_t cmd) {
-	int i;
+/* same as kbde_write_command but checks for ACK */
+int kbde_write_cmd_with_ack(uint8_t cmd) {
+	int r;
+
+	if ((r = kbde_write_command(cmd)) == -1) {
+		printk("%s: failed to send command 0x%x\n", __func__, cmd);
+		return -1;
+	}
+
+	r = kbde_read_data();
+	return r;
+}
+
+// writes to port 0x64
+int kbdc_write_command(uint8_t cmd) {
 	uint8_t s;
+	int i;
 
 	for (i=0; i < KBD_POLL_TRIES; i++) {
 		s = kbdc_read_status();
@@ -128,62 +117,104 @@ int8_t kbdc_write_command(uint8_t cmd) {
 	return -1;
 }
 
-/* installs the kbd handler and enable irq1 */
+// writes to port 0x64. If command is 2-byte (next byte), next byte needs to be written to 0x60
+// if response is expected read from 0x60 has to be done
+int kbdc_write_command_2(uint8_t cmd, uint8_t nextbyte, int flags) {
+	int r;
+
+	if ((r=kbdc_write_command(cmd)) == -1) {
+		printk("%s: failed to write ctrl command 0x%x\n", __func__, r);
+		return 1;
+	}
+
+	/* 2-byte command */
+	if (flags & KBDC_TWOBYTE_CMD) {
+		if ((r=kbde_write_command(nextbyte)) == -1) {
+			printk("%s: failed to write nextbyte: 0x%x\n", __func__, r);
+			return -1;
+		}
+	}
+
+	if (flags & KBDC_RESPONSE_EXPECTED) {
+		r = kbde_read_data();
+		return r;
+	}
+	return 0;
+}
+
+/* check if PS/2 controller exists, install the kbd handler and enable irq1 */
+/* XXX: in the future we should check ACPI tables to see if we have PS/2 ctrl */
 int __init_kbd_module() {
+	uint16_t id;
+	int i,r;
+
 	memset((void*)&kbd, 0, sizeof(struct kbd_state));
-/*
-	uint8_t c, e;
-	printk("test of PS/2 controller\n");
 
-	// check for controller
-	if ((kbdc_write_command(KBDC_CMD_PS2_CTRL_TEST)) == -1) {
-		printk("failed to send KBDC_CMD_PS2_CTRL_TEST\n");
-	}
+	// Test if system has ps/2 controller.
 
-	if ((c = kbde_read_data()) != 0x55) {
-		printk("test failed: %x\n", c);
-	} else {
-		printk("test passed: %x\n", c);
-	}
+	// TODO:
+	// 	pre-ACPI systems: assume ps/2 is there
+	//	ACPI: check if ps/2 is there
 
-	// check for ps/2 port
-	printk("testing PS/2 port\n");
-	if ((kbdc_write_command(KBDC_CMD_PS2_PORT1_TEST)) == -1) {
-		printk("%s: failed to send KBDC_CMD_PS2_PORT1_TEST\n", __func__);
-	}
+	// XXX: order is not ok. ctrl byte should be read and ports disabled sooner
 
-	if ((c = kbde_read_data()) != 0) {
-		printk("PS/2 port test failed with err: %x\n", c);
-	} else {
-		printk("PS/2 port check passed.\n");
-	}
-
-
-	// check if keyboard replies to echo
-	printk("%s: sending echo request to keyboard\n", __func__);
-	if ((kbde_write_command(KBDE_CMD_ECHO)) == -1) {
-		printk("%s: failed to send KBDE_CMD_ECHO\n", __func__);
-	}
-	if ((c = kbde_read_data()) != 0xEE) {
-		printk("echo keyboard test failed.\n");
-	} else {
-		printk("echo keyboard test passed.\n");
-	}
-
-	if ((kbdc_write_command(0x20)) == -1) {
-		printk("%s: failed to send command 0x20\n", __func__);
+	// check #1: do we have a ps/2 controller ?
+	if ((r = kbdc_write_command_2(KBDC_CMD_PS2_CTRL_TEST, 0, KBDC_RESPONSE_EXPECTED)) != KBDC_CMD_RESPONSE_SELFTEST_OK) {
+		printk("%s: ps/2 controller selftest failed, error: 0x%x\n", __func__, r);
 		return -1;
 	}
 
-	e = kbde_read_data();
-	printk("%s: 0x20 reply: %x\n", __func__, e);
-
-	if ((kbdc_write_command(0x60)) == -1) {
-		printk("%s: failed to send command 0x60\n", __func__);
+	// check #2: ps/2 port 1
+	if ((r = kbdc_write_command_2(KBDC_CMD_PS2_PORT1_TEST, 0, KBDC_RESPONSE_EXPECTED)) != 0) {
+		printk("%s: ps/2 port1 test failed, error: 0x%x\n", __func__, r);
 		return -1;
 	}
-	kbde_write_command(1);
-*/
+
+	// check #3: ps/2: echo keyboard
+	if ((r = kbde_write_cmd_with_ack(KBDE_CMD_RESPONSE_ECHO)) != KBDE_CMD_RESPONSE_ECHO) {
+		printk("%s: ps/2 keyboard echo failed, error: 0x%x\n", __func__, r);
+		return -1;
+	}
+
+	// ps/2 keyboard responded. Disable it before issuing further commands
+	if((r=kbde_write_cmd_with_ack(KBDE_CMD_DISABLE)) != KBDE_CMD_RESPONSE_ACK) {
+		printk("%s: failed to disable keyboard, error: 0x%x\n", __func__, r);
+		return -1;
+	}
+
+	/* PS/2 port 1 is now disabled, we should enable it before quiting function in case of an error */
+
+
+	// keyboard: disable translation
+	r = (KBDC_CONFBYTE_1ST_PS2_INTERRUPT & ~KBDC_CONFBYTE_1ST_PS2_TRANSLATION)|KBDC_CONFBYTE_2ND_PS2_PORT_DISABLED;
+
+	if ((kbdc_write_command_2(KBDC_CMD_WRITE_COMMAND_BYTE, r, KBDC_TWOBYTE_CMD|KBDC_NORESPONSE)) == -1) {
+		printk("%s: warning: disabling translation failed.\n", __func__);
+	}
+
+	// keyboard: identify
+	if(kbde_write_cmd_with_ack(KBDE_CMD_IDENTIFY) != KBDE_CMD_RESPONSE_ACK) {
+		printk("%s: failed to identify keyboard\n", __func__);
+	}
+
+	// the 2nd id can be timeout error
+	id = kbde_read_data();
+	id = kbde_read_data() << 8 | id;
+
+	// match the id against known device types
+	kbd.devtype = &kbd_device_type[0];
+	for (i =0; i < KBD_DEVICE_TYPES; i++) {
+		if (id == kbd_device_type[i].kbd_device_id) {
+			kbd.devtype = &kbd_device_type[i];
+			break;
+		}
+	}
+	printk("%s: keyboard: %s (%x)\n", __func__, kbd.devtype->kbd_name, id);
+
+	if(kbde_write_cmd_with_ack(KBDE_CMD_ENABLE) != KBDE_CMD_RESPONSE_ACK) {
+		printk("%s: failed to enable keyboard\n",  __func__);
+		return -1;
+	}
 
 	#ifdef DEBUG
 	printk("%s: about to enable irq1\n", __func__);
@@ -197,11 +228,16 @@ int __init_kbd_module() {
 // handler exits to the irq_cleanup code
 void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
 	//printk("%s: attempting to get data\n", __func__);
-
 	uint8_t scancode = kbde_read();
 
-	kbd.key = scancode;
+	printk("0x%x\n", scancode);
+
+	kbd.kbuf[kbd.c_idx++] = scancode;
 	kbd.flags = 1;		// ready for input
+
+	if (scancode == SCAN1_LSHIFT || scancode == SCAN1_RSHIFT) {
+		kbd.shift_flags = 1;
+	}
 
 	send_8259_EOI(1);
 }
