@@ -46,7 +46,11 @@ void helper_printk_u(uint32_t nr, char lz);
 
 void dump_memory(uint32_t* addr, uint32_t size);
 
+/* string functions */
 char* memset(void* dst, int c, size_t n);
 void* memcpy(void* dst, const void* src, size_t n);
+size_t strlen(const char* str);
+char* strcpy(char* dst, char* src);
+
 
 #endif /* ifndef HAVE_LIBK_H */

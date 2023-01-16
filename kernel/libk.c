@@ -1,5 +1,6 @@
 #include <stdint.h>
-#include <stdarg.h>
+#include <stdarg.h>		// varargs
+#include <stddef.h>		// size_t
 
 #include "libk.h"
 #include "cons.h"
@@ -224,5 +225,21 @@ void* memcpy(void* dst, const void* src, size_t n) {
 	for (i=0; i < n; i++) {
 		*((char*)dst+i) = *((char*)src+i);
 	}
+	return dst;
+}
+
+size_t strlen(const char* str) {
+	size_t s;
+	for (s =0; *str != '\0'; str++, s++);
+	return s;
+}
+
+char* strcpy(char* dst, char* src) {
+	size_t i,s = strlen(src);
+
+	for (i =0; i < s; i++) {
+		*(dst+i) = *(src+i);
+	}
+	*(dst+i) = '\0';
 	return dst;
 }
