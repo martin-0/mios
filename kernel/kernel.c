@@ -40,10 +40,11 @@ void kernel_main(struct kernel_args* __kargs) {
 	smap = (e820_map_t *)kargs.smap_ptr;
 	load_gdt();
 
+/*
 	for (i =0; i < BDA_COM_PORTS; i++) {
 		printk("com%d: 0x%x\n", i, kargs.com_ports[i]);
 	}
-
+*/
 	printk("welcome to kernel_main\n");
 
 	if ((uart_init(COM1_BASE, 9600)) != 0) {
@@ -59,59 +60,39 @@ void kernel_main(struct kernel_args* __kargs) {
 
 		// XXX: kbd still needs to translate scan codes
 		read_string(buf, 32);
-		printk("%d: %s\n", i,buf);
+		printk("\n%d: >%s<\n", i,buf);
+		printk("len: %d\n", strlen(buf));
 
-	/*
-		key = getc();
-		switch(key) {
-		// A
-		case 0x1e:
-				poll_uart_write('A', COM1_BASE);
-				break;
-		// S
-		case 0x73:
-		case 0x1f:      check_irq_stats();
-				r = inb_p(COM1_BASE + UART_REG_MCR);
-				r2 = inb_p(COM1_BASE + UART_REG_MSR);
-
-				printk("0x%x: MCR: 0x%x, MSR: 0x%x\n", COM1_BASE, r, r2);
-				break;
-
-		// I
-		case 0x69:
-		case 0x17:      debug_status_8259("main");
-				break;
-
-		// K
-		case 0x6b:
-		case 0x25:      asm("int $0x80");
-				break;
-		// N
-		case 0x6e:
-		case 0x31:      __asm__ ("int $2");
-				break;
-
-		// M
-		case 0x6d:
-		case 0x32:      show_e820map();
-				break;
-
-		}
-	*/
-		i++;
-		//asm("hlt");
-		if ( i > 4) {
-			i=0;
+		if ((strncmp(buf, "stat", 4)) == 0) {
 			check_irq_stats();
-			debug_status_8259("main");
-
 			r = inb_p(COM1_BASE + UART_REG_MCR);
 			r2 = inb_p(COM1_BASE + UART_REG_MSR);
 			printk("0x%x: MCR: 0x%x, MSR: 0x%x\n", COM1_BASE, r, r2);
-
+			goto mainloop;
 		}
-	}
 
+		if ((strncmp(buf, "irq", 3)) == 0) {
+			debug_status_8259("main");
+			goto mainloop;
+		}
+
+		if ((strncmp(buf, "kill", 3)) == 0) {
+			asm volatile("int $0x80");
+			goto mainloop;
+		}
+
+		if ((strncmp(buf, "nmi", 3)) == 0) {
+			asm volatile("int $2");
+		}
+
+		if ((strncmp(buf, "map", 3)) == 0) {
+			show_e820map();
+			goto mainloop;
+		}
+
+	mainloop:
+		i++;
+	}
 }
 
 // copy kernel args from bootloader into kernel ones
