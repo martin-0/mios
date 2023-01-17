@@ -126,17 +126,17 @@ void init_8259(void) {
 
 	// ICW2: actual remapping of IRQs
 	outb(0x20, MASTER_PIC_DATA);				// IRQ 0-7  0x20-0x27
-	outb(0x28, SLAVE_PIC_COMMAND);				// IRQ 8-15 0x28-0x2f
+	outb(0x28, SLAVE_PIC_DATA);				// IRQ 8-15 0x28-0x2f
 	delay_p80();
 
 	// ICW3: set relationship between master and slave PIC 
 	outb(4, MASTER_PIC_DATA);				// 2nd bit - IRQ2 goes to slave
-	outb(2, SLAVE_PIC_COMMAND);				// bit notation: 010: master IRQ to slave
+	outb(2, SLAVE_PIC_DATA);				// bit notation: 010: master IRQ to slave
 	delay_p80();
 
 	// ICW4: x86 mode
 	outb(ICW4_MODE_x86, MASTER_PIC_DATA);
-	outb(ICW4_MODE_x86, SLAVE_PIC_COMMAND);
+	outb(ICW4_MODE_x86, SLAVE_PIC_DATA);
 	delay_p80();
 
 	// on slave disable all IRQs
@@ -268,7 +268,7 @@ void init_idt() {
 	ofst = 0;
 	for (i =0 ; i < TRAP_ENTRIES_LOW; i++) {
 		setup_idt_entry(__trap_setframe_early+ofst, KERN_CS, i, IDT_GATE32_TRAP);
-		trap_handlers[i] = unused_trap_handler;
+		trap_handlers[i] = dflt_trap_handler;
 		ofst += 12;	// each __trap_setframe_early trap is 12B apart in idt.S
 		// XXX: I should use some better method than this
 	}
@@ -288,11 +288,6 @@ void init_idt() {
 	for (; i < IDT_ENTRIES; i++) {
 		setup_idt_entry(NULL, KERN_CS, i, IDT_GATE32_TRAP & ~(IDT_TYPE_SEGMENT_PRESENT));
 	}
-
-
-	// XXX: set only to test if int $0x80 will cause this trap11
-	trap_handlers[11] = dummy_int11_handler;
-	//printk("init_idt: int11_handler: %p\n", dummy_int11_handler);
 
 	#ifdef DEBUG_IRQ
 		debug_status_8259("init_idt");
@@ -361,12 +356,13 @@ void debug_trap_frame(struct trapframe* f) {
 
 void decode_selector_err(int err) {
 	char* descref[4] = { "GDT", "IDT", "LDT", "IDT" };
-	char* origin[2] = { "external to CPU", "CPU" };
+	char* origin[2] = { "CPU", "external to CPU" };
 
-	printk( "%s, %s, selector 0x%x\n", origin[err & 1], descref[(err >> 1) & 2], err >> 3);
+	printk( "%s, %s, 0x%x\n", origin[err & 1], descref[(err >> 1) & 3], err >> 3);
 }
 
-void unused_trap_handler(struct trapframe* f) {
-	printk("unused_trap_handler: default trap handler\n");
+/* NOTE: default trap handler to notify us; should be replaced with actual one */
+void dflt_trap_handler(struct trapframe* f) {
+	printk("%s: trap %d, error 0x%x\n", __func__, f->trapnr, f->err);
 	debug_trap_frame(f);
 }
