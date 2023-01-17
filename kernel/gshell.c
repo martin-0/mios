@@ -6,7 +6,7 @@
 #include "libk.h"
 #include "cons.h"
 
-extern kbd_state_t kbd;
+extern struct kbd atkbd;
 extern uart_state_t com0_state;
 
 #define         MAX_SC1_LINES           255             // sizeof(char)
@@ -17,15 +17,15 @@ extern uart_state_t com0_state;
 //};
 
 int getc() {
-	int i,c;
+	int c;
 	// XXX: we should use mutex here!!
 	while(1) {
-		if (kbd.flags & 1) {
+		if (atkbd.flags & 1) {
 			// XXX	we are on a single CPU computer and lack mutex protection right now
 			//	lame but doable approach here is to disable interrupts
 			asm volatile("cli");
 
-			kbd.flags &= ~1;
+			atkbd.flags &= ~1;
 			asm volatile("sti");
 			goto out;
 		}
@@ -55,17 +55,24 @@ int read_string(char* buf, size_t n) {
 
 		// XXX: why is c over serial line sending \r only ?
 		if ( c == 0x0d || c == 0x0a ) {
-			*(buf+i) = 0;
+			*(buf+i) = '\0';
 			goto out;
 		}
+
+		// backspace
+		if (c == 0x7f || c == 0x08 ) {
+			if (i > 0) i--;
+			*(buf+i) = '\0';
+			continue;
+		}
+
 		*(buf+i) = c;
 		i++;
 	}
 
-	// unlikely event of n being 0
-	if (!n) return 0;
+	if (!i) return 0;
 
-	*(buf+i-1) = 0;
+	*(buf+i-1) = '\0';
 out:
 	return i;
 }
