@@ -39,8 +39,8 @@ void cputc(char c, char attrib) {
 				poll_uart_write('\r', com1_console);
 				poll_uart_write('\n', com1_console);
 			}
-
 			goto exit;
+			break;
 
 	case '\t':	
 			t = TABSPACE - (cursx % TABSPACE);
@@ -61,12 +61,29 @@ void cputc(char c, char attrib) {
 			}
 
 			goto exit;
+			break;
 
 	case '\r':	cursx = 0;
 			if (com1_console) {
 				poll_uart_write('\r', com1_console);
 			}
 			goto exit;
+			break;
+
+	case 0x7f:
+	case 0x08:	// XXX: we have cursx defined as unsigned char, not ok
+			//	i can't test easily now against curs* < 0
+			// TODO: change cursxy to int
+			cursx--; 	// if it was 0 it will be 255
+
+			if ((signed char)cursx < 0 ) {
+				cursx = COLS;
+				cursy--;
+				if (cursy < 0) cursy = 0;
+			}
+			*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | 0x20;
+			goto exit_setcursor;
+			break;
 	}
 
 	/*
@@ -90,6 +107,8 @@ exit:
 		cursy++;
 	}
 	if (cursy == ROWS) scroll();
+
+exit_setcursor:
 	setcursor();
 }
 
