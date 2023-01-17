@@ -194,21 +194,16 @@ trap_dispatch:
 .global irq_handler_dflt			/* called by __irq_setframe_early */
 .func irq_handler_dflt				/* NOTE: interrupts with this handler are masked */
 irq_handler_dflt:
-	movl 0x30(%eax), %eax
+	pushl %eax
+	movl $(debug_dflt_handler), %eax
+	call puts
+
+	popl %eax
+	movl 0x2c(%eax), %eax
 	call send_8259_EOI
 	ret
 .endfunc
 
-// Segment Not Present NP, with error code
-.global dummy_int11_handler
-.func dummy_int11_handler
-dummy_int11_handler:
-	/* frame is prepped by the __trap_setframe_early */
-	call debug_trap_frame
-	addl $2, 0x30(%esp)			// XXX: dummy fix for int 0x11
-	ret
-.endfunc
-
-
 .section .data
-	debug_halted: .asciz "System debug_halted.\n"
+	debug_halted: 		.asciz "System debug_halted.\n"
+	debug_dflt_handler:	.asciz	"default, unassigned IRQ handler called!\n"
