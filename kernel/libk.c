@@ -6,6 +6,78 @@
 #include "cons.h"
 #include "uart.h"
 
+void dump_memory(uint32_t* addr, uint32_t size) {
+	uint32_t* cur_addr = addr;
+	uint32_t i, chunks;
+
+	// round up chunks
+	chunks = ( size + sizeof(uint32_t)-1 ) / sizeof(uint32_t);
+
+	printk("%p", cur_addr);
+	for(i =0; i < chunks; i++) {
+		printk("\t%p", *cur_addr++);
+		if ((i+1)%4 == 0) {
+			printk("\n%p", cur_addr);
+		}
+	}
+	putc('\n');
+}
+
+char* memset(void* str, int c, size_t n) {
+	size_t i;
+	for(i = 0; i < n; i++) {
+		*((char*)str+i) = c;
+	}
+	return str;
+}
+
+void* memcpy(void* dst, const void* src, size_t n) {
+	size_t i;
+	for (i=0; i < n; i++) {
+		*((char*)dst+i) = *((char*)src+i);
+	}
+	return dst;
+}
+
+size_t strlen(const char* str) {
+	size_t s;
+	for (s =0; *str != '\0'; str++, s++);
+	return s;
+}
+
+char* strcpy(char* dst, const char* src) {
+	size_t i,s = strlen(src);
+
+	for (i =0; i < s; i++) {
+		*(dst+i) = *(src+i);
+	}
+	*(dst+i) = '\0';
+	return dst;
+}
+
+int strcmp(const char* s1, const char* s2) {
+	int i;
+	int len1 = strlen(s1);
+
+	for (i =0; i < len1; i++) {
+		if (*(s1+i) != *(s2+i) )
+			goto out;
+	}
+out:
+	return *(s1+i)-*(s2+i);
+
+}
+
+int strncmp(const char* s1, const char* s2, size_t n) {
+	size_t i;
+
+	for (i =0; i < n; i++) {
+		if (*(s1+i) != *(s2+i) )
+			return *(s1+i)-*(s2+i);
+	}
+	return 0;
+}
+
 uint32_t printk(char* fmt, ...) {
 	va_list ap;
 	
@@ -195,51 +267,3 @@ void helper_printk_x16(uint16_t nr, char lz, char ofst) {
 	}
 }
 
-void dump_memory(uint32_t* addr, uint32_t size) {
-	uint32_t* cur_addr = addr;
-	uint32_t i, chunks;
-
-	// round up chunks
-	chunks = ( size + sizeof(uint32_t)-1 ) / sizeof(uint32_t);	
-
-	printk("%p", cur_addr);
-	for(i =0; i < chunks; i++) {
-		printk("\t%p", *cur_addr++);
-		if ((i+1)%4 == 0) {
-			printk("\n%p", cur_addr);
-		}
-	}
-	putc('\n');
-}
-
-char* memset(void* str, int c, size_t n) {
-	size_t i;
-	for(i = 0; i < n; i++) {
-		*((char*)str+i) = c;
-	}
-	return str;
-}
-
-void* memcpy(void* dst, const void* src, size_t n) {
-	size_t i;
-	for (i=0; i < n; i++) {
-		*((char*)dst+i) = *((char*)src+i);
-	}
-	return dst;
-}
-
-size_t strlen(const char* str) {
-	size_t s;
-	for (s =0; *str != '\0'; str++, s++);
-	return s;
-}
-
-char* strcpy(char* dst, char* src) {
-	size_t i,s = strlen(src);
-
-	for (i =0; i < s; i++) {
-		*(dst+i) = *(src+i);
-	}
-	*(dst+i) = '\0';
-	return dst;
-}
