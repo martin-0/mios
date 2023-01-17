@@ -39,6 +39,21 @@ uint64_t irq_stats[IRQ_ENTRIES];				// IRQ stats
 
 trap_handler_t trap_handlers[TRAP_ENTRIES_LOW];			// actual trap handlers
 
+typedef enum e_trapnr {
+	T_DIV0 = 0,
+	T_DEBUG = 1,
+	T_NMI = 2,
+	T_BREAK = 3,
+	T_OVRFLW = 4,
+	T_INVOP = 6,
+	T_DF = 8,
+	T_TSS = 10,
+	T_SNP = 11,
+	T_SSF = 12,
+	T_GPF = 13,
+	T_PF = 14
+} e_trapnr_t;
+
 trap_desc_t traps[TRAP_ENTRIES_LOW] = {
 		{ "Divide by zero",			0, 0 },
 		{ "Debug",				1, 0 },
@@ -313,8 +328,7 @@ void debug_status_8259(char* caller) {
 
 void check_irq_stats(void) {
 	uint32_t i;
-	//XXX: # for now disable all# for (i =0 ; i < 16; i++) {
-	for (i =0 ; i < 5; i++) {
+	for (i =0 ; i < 16; i++) {
 		printk("irq%d: %llx\n", i, irq_stats[i]);
 	}
 }
@@ -327,10 +341,29 @@ void debug_irq_frame(struct trapframe* f) {
 }
 
 void debug_trap_frame(struct trapframe* f) {
-	printk("------ TRAP ------\n%s\ntrap error: 0x%x\nEIP: %p\tESP: %p\tEBP: %p\n"
+
+	printk("------ TRAP ------\ntrap %d: %s\ntrap error: 0x%x\n", f->trapnr, traps[f->trapnr].desc, f->err);
+
+	// decode trap specific error
+	switch(f->trapnr) {
+	case	T_TSS:
+	case	T_SSF:
+	case	T_GPF:
+	case	T_SNP:
+			decode_selector_err(f->err);
+			break;
+	}
+
+	printk("EIP: %p\tESP: %p\tEBP: %p\n"
 		"EAX: %p\tEBX: %p\tECX: %p\nEDX: %p\tEDI: %p\tESI: %p\n"
-		"CS: 0x%hx\tEFLAGS: %p\n<<----------------\n", traps[f->trapnr].desc,
-			f->err, f->eip, f->esp, f->ebp, f->eax, f->ebx, f->ecx, f->edx, f->edi, f->esi, f->cs, f->eflags);
+		"CS: 0x%hx\tEFLAGS: %p\n<<----------------\n", f->eip, f->esp, f->ebp, f->eax, f->ebx, f->ecx, f->edx, f->edi, f->esi, f->cs, f->eflags);
+}
+
+void decode_selector_err(int err) {
+	char* descref[4] = { "GDT", "IDT", "LDT", "IDT" };
+	char* origin[2] = { "external to CPU", "CPU" };
+
+	printk( "%s, %s, selector 0x%x\n", origin[err & 1], descref[(err >> 1) & 2], err >> 3);
 }
 
 void unused_trap_handler(struct trapframe* f) {

@@ -98,6 +98,7 @@ void debug_install_irq1(void);
 void debug_irq_frame(struct trapframe* f);
 void debug_trap_frame(struct trapframe* f);
 void unused_trap_handler(struct trapframe* f);
+void decode_selector_err(int err);
 
 void handle_nmi(struct trapframe* f, uint16_t reason);
 
