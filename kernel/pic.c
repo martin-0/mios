@@ -140,7 +140,7 @@ void init_8259(void) {
 	delay_p80();
 
 	// on slave disable all IRQs
-	write_8259(SLAVE_PIC_DATA, ~0);
+	write_8259(SLAVE_PIC_DATA, ~4);
 
 	// on master enable IRQ2 only 
 	write_8259(MASTER_PIC_DATA, ~4);
@@ -155,7 +155,7 @@ void mask_irq(uint8_t irq) {
 	m = irq;
 
 	if (irq > 7) {
-		m = (irq >> 4);
+		m = irq - 8;
 		ctrl = SLAVE_PIC_DATA;
 	}
 	else {
@@ -186,7 +186,7 @@ void clear_irq(uint8_t irq) {
 	m = irq;
 
 	if (irq > 7) {
-		m = (irq >> 4);
+		m = irq - 8;
 		ctrl = SLAVE_PIC_DATA;
 	}
 	else {
