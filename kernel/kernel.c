@@ -90,6 +90,11 @@ void kernel_main(struct kernel_args* __kargs) {
 			goto mainloop;
 		}
 
+		if ((strncmp(buf, "buf", 3)) == 0 ) {
+			dbg_kbd_dumpbuf();
+			goto mainloop;
+		}
+
 	mainloop:
 		i++;
 	}
