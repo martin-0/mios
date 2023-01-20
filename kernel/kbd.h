@@ -16,45 +16,49 @@
 #define	SCAN1_ENTER		0x1c
 
 
-#define	NAME_KBDC		"i8042c"
+#define	KBDC_NAME		"kbdc"
+#define	KBDC_INTERNAL_BUFSIZE	16
 #define	MAX_COMMAND_QUEUE	32
 
-typedef enum kbdc_port {
+/* to define list of known keyboards and its ids */
+struct kbd_devtype_name {
+	uint16_t kbd_device_id;
+	char* kbd_name;
+};
+
+typedef enum e_kbdc_port {
 	PS2_PORT1 = 1,
 	PS2_PORT2 = 2
-} kbdc_port_e;
+}e_kbdc_port_t;
 
 typedef struct kbdc_command {
 	uint8_t cmd[2];
 	int16_t response;
 	uint8_t flags;
-	kbdc_port_e dst_port;
+	e_kbdc_port_t dst_port;
 } kbdc_command_t;
+
 
 struct kbdc {
 	char devname[DEVNAME_SIZE];
-	uint8_t	nrports;
+	uint8_t	nports;
 	uint8_t at_ctrl:1;					// AT compatible controller
 
 	kbdc_command_t cmd_q[MAX_COMMAND_QUEUE];
+	uint8_t c_idx;
+	uint8_t r_idx;
 	uint8_t qlen;
 
-	device_t* p1;
-	device_t* p2;
+	device_t* ports[2];
 };
 
-
 struct kbd {
-	struct kbd_devtype_name {
-		uint16_t kbd_device_id;
-		char* kbd_name;
-	} devtype;
-
+	uint16_t kbd_device_id;
 	uint8_t special_keys;					// 1-shift, 2-ctrl, 3-alt
 	uint8_t ledstate:3;
-	int flags;
+	int flags;						// XXX: translated scancodes; ? something else? separate vars ?
 
-	#define	KBD_RBUF_MAX	128
+	#define	KBD_RBUF_MAX	256
 	unsigned char kbuf[KBD_RBUF_MAX];
 	uint8_t c_idx;
 	uint8_t r_idx;
@@ -69,9 +73,6 @@ int kbde_poll_write_a(uint8_t cmd);
 
 int kbdc_poll_write(uint8_t cmd);
 int kbdc_send_cmd(uint8_t cmd, uint8_t nexbyte, int flags);
-
-// XXX: to be moved away
-void psm_isr_handler(__attribute__((unused)) struct trapframe* f);
 
 /* I/O port
 
@@ -99,6 +100,8 @@ Note: while port 0x60 is used for direct communication with keyboard it still go
 	Encoder communicates back to this port as response to commnad but also sends make/brake codes.
 
 */
+
+#define	KBDC_RETRY_ATTEMPTS			3
 
 #define	KBDE_DATA_PORT				0x60
 #define	KBDC_READ_STATUS_PORT			0x64
@@ -128,7 +131,6 @@ Note: while port 0x60 is used for direct communication with keyboard it still go
 // These won't work on AT connector
 #define KBDC_CMD_DISABLE_PS2_P2			0xa7		//		none
 #define KBDC_CMD_ENABLE_PS2_P2			0xa8		//		none
-
 #define	KBDC_CMD_PS2_P2_TEST			0xa9		//		0x00: ok, 1,2,3,4: lines stuck
 #define	KBDC_CMD_PS2_CTRL_SELFTEST		0xaa		//		0x55: ok, 0xfc: failed
 #define	KBDC_CMD_PS2_P1_TEST			0xab		//		0x00: ok, 1,2,3,4: lines stuck
@@ -136,6 +138,7 @@ Note: while port 0x60 is used for direct communication with keyboard it still go
 #define	KBDC_CMD_ENABLE_PS2_P1			0xae		//		none
 #define	KBDC_CMD_READ_CTRL_OUTPUT		0xd0
 
+#define	KBDC_CMD_RESPONSE_PORTTEST_OK		0x00
 #define	KBDC_CMD_RESPONSE_SELFTEST_OK		0x55
 #define	KBDC_CMD_RESPONSE_SELFTEST_FAILED	0xfc
 
@@ -154,6 +157,9 @@ Note: while port 0x60 is used for direct communication with keyboard it still go
 #define	KBDE_CMD_RESPONSE_ACK			0xfa
 #define	KBDE_CMD_RESPONSE_BAT_ERR		0xfc
 #define	KBDE_CMD_RESPONSE_RESEND		0xfe
+#define	KBDE_CMD_RESET				0xff
 
+// debug
+void dbg_kbd_dumpbuf();
 
 #endif /* ifndef HAVE_KBD_H */

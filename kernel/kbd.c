@@ -30,6 +30,12 @@ struct kbd_devtype_name	kbd_device_type[KBD_DEVICE_TYPES] = {
 struct kbdc atkbdc;
 struct kbd atkbd;
 
+device_t devkbd = {
+	.devname = "unknown",
+	.dev = (struct kbd*)&atkbd
+};
+
+
 // read port 0x60; used in ISR where we know there is data available
 static inline uint8_t kbde_read() {
 	return inb(KBDE_DATA_PORT);
@@ -138,7 +144,7 @@ int kbdc_poll_write(uint8_t cmd) {
  *
 */
 int kbdc_send_cmd(uint8_t cmd, uint8_t nextbyte, int flags) {
-	int r, retries;
+	int r;
 
 	if ((r=kbdc_poll_write(cmd)) == -1) {
 		printk("%s: failed to write ctrl command 0x%x\n", __func__, r);
@@ -163,21 +169,16 @@ int kbdc_send_cmd(uint8_t cmd, uint8_t nextbyte, int flags) {
 /* check if PS/2 controller exists, install the kbd handler and enable irq1 */
 /* XXX: in the future we should check ACPI tables to see if we have PS/2 ctrl */
 int __init_kbd_module() {
-	printk("%s: enter\n", __func__);
-
 	uint16_t id;
-	int i,r,cbyte;
+	int i,r,cbyte,orig_cbyte;
 	int exp_ctrl_response;
-	int ps2_p1,ps2_p2;
-
-	// XXX
-	int is_dualport;
-	int is_at = 0;
+	int ps2_ports[2];
 
 	memset((void*)&atkbdc, 0, sizeof(struct kbdc));
 	memset((void*)&atkbd, 0, sizeof(struct kbd));
+	memset((void*)&devkbd, 0, sizeof(devkbd));
 
-	strcpy(atkbdc.devname, NAME_KBDC);
+	strcpy(atkbdc.devname, KBDC_NAME);
 
 	// Test if system has PS/2 controller.
 
@@ -186,243 +187,217 @@ int __init_kbd_module() {
 	//	ACPI: check if PS/2 is there
 	//	code assumes there is PS/2 controller
 	//	allow to resend commands when failure occurs before giving up on controller
-
-	// XXX:	check for the reason why write fails ?
+	//	resend command in case of an failure ?
 
 	/* step 1:	Disable PS/2 ports.
 		If PS/2 port 2 doesn't exist command is ignored.
-		On PS/2 ctrl KBDC_CMD_DISABLE_PS2_P2 sets bit5 to 1(disable)
-		On AT ctrl it does nothing, bit5 is 0
+		On PS/2 ctrl KBDC_CMD_DISABLE_PS2_P2 sets bit5 to 1(disable).
+		On AT ctrl it does nothing, bit5 is 0.
+
+		Initialization tries to disable both ports. If error occurs further down
+		during initialization ports are kept disabled.
 	*/
 
 	if ((r = kbdc_send_cmd(KBDC_CMD_DISABLE_PS2_P1, 0, KBDC_NORESPONSE)) != 0) {
-		printk("KBDC_CMD_DISABLE_PS2_P1 failed, error: 0x%x\n", r);
+		#ifdef DEBUG
+		printk("kbd: KBDC_CMD_DISABLE_PS2_P1 failed, error: 0x%x\n", r);
+		#endif
 		return -1;
 	}
 
 	if ((r = kbdc_send_cmd(KBDC_CMD_DISABLE_PS2_P2, 0, KBDC_NORESPONSE)) != 0) {
-		printk("KBDC_CMD_DISABLE_PS2_P2 failed, error: 0x%x\n", r);
+		#ifdef DEBUG
+		printk("kbd: KBDC_CMD_DISABLE_PS2_P2 failed, error: 0x%x\n", r);
+		#endif
 		return -1;
 	}
 
 	/* step 2:	flush the output buffer */
-	// XXX: do I really need to do this up to 16 times?
-	#define	i8042_BUFSZ	16
-	for (i =0 ; i < i8042_BUFSZ; i++) {
+	for (i =0 ; i < KBDC_INTERNAL_BUFSIZE ; i++) {
 		r = kbde_read();
 	}
 
 	/* step 3:	read the control byte from controller and disable port interrupts and translation */
 	if ((cbyte = kbdc_send_cmd(KBDC_CMD_READ_COMMAND_BYTE, 0, KBDC_RESPONSE_EXPECTED)) == -1) {
-		printk("KBDC_CMD_READ_COMMAND_BYTE failed: 0x%x\n", cbyte);
+		printk("kbd: KBDC_CMD_READ_COMMAND_BYTE failed: 0x%x\n", cbyte);
 		return -1;
 	}
-	printk("read control byte: 0x%x\n", cbyte);
+
+	// save for later
+	orig_cbyte = cbyte;
 
 	/* if bit5 was not toggled we are using AT connector */
 	if ( (cbyte & KBDC_CONFBYTE_PS2_P1_DISABLED) == 0 ) {
-		is_at = 1;
 		atkbdc.at_ctrl = 1;
 		exp_ctrl_response = 0;
-		printk("AT controller\n");
-	} else {
-		is_at = 0;
+	}
+	else {
 		exp_ctrl_response = KBDC_CMD_RESPONSE_SELFTEST_OK;
-		printk("PS/2 controller\n");
 	}
 
-	/* disable port interrupts and translation */
+	/* disable port interrupts and translation, allow selftest even if this command fails */
 	cbyte &= ~(KBDC_CONFBYTE_PS2_P1_INTERRUPT|KBDC_CONFBYTE_PS2_P2_INTERRUPT|KBDC_CONFBYTE_PS2_P1_TRANSLATION);
-	printk("new control byte: 0x%x\n", cbyte);
 
 	if ((kbdc_send_cmd(KBDC_CMD_WRITE_COMMAND_BYTE, cbyte, KBDC_TWOBYTE_CMD|KBDC_NORESPONSE)) == -1) {
-		printk("warning: KBDC_CMD_WRITE_COMMAND_BYTE failed.\n");
-		// allow to do the selftest, if that fails return with error
+		printk("kbd: WARNING: KBDC_CMD_WRITE_COMMAND_BYTE failed, proceeding anyway.\n");
 	}
 
-	/* step 4:	initiate SELFTEST of the controller */
-	if ((r = kbdc_send_cmd(KBDC_CMD_PS2_CTRL_SELFTEST, 0, KBDC_RESPONSE_EXPECTED)) != exp_ctrl_response) {
-		printk("PS/2 controller selftest failed, error: 0x%x (expected 0x%x)\n", r, exp_ctrl_response);
+	/* step 4:	initiate SELFTEST of the controller
+
+		If there was a problem with keyboard POST test would probably catch it.
+		Selftest is important enough to make an effort here and retry few times before giving up.
+	*/
+	for (i =0; i < KBDC_RETRY_ATTEMPTS; i++) {
+		if ((r = kbdc_send_cmd(KBDC_CMD_PS2_CTRL_SELFTEST, 0, KBDC_RESPONSE_EXPECTED)) == exp_ctrl_response) {
+			break;
+		}
+		printk("kbd: PS/2 controller selftest failed (0x%x), %d of %d\n", r, i, KBDC_RETRY_ATTEMPTS);
+	}
+
+	if (r != exp_ctrl_response) {
+		printk("kbd: PS/2 controller selftest failed.\n");
 		return -1;
 	}
 
-	/* step 5:	check for 2nd port on ps/2 controller */
-	if (!atkbdc.at_ctrl) {
-		printk("check for PS/2 ps2_p2\n");
-		if ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P2, 0, KBDC_NORESPONSE)) != 0) {
-			printk("KBDC_CMD_ENABLE_PS2_P2 failed, error: 0x%x\n", r);
-		}
+	/* prepare the configuration byte again */
+	cbyte = orig_cbyte & ~(KBDC_CONFBYTE_PS2_P1_INTERRUPT|KBDC_CONFBYTE_PS2_P2_INTERRUPT|KBDC_CONFBYTE_PS2_P1_TRANSLATION);
 
-		if ((cbyte = kbdc_send_cmd(KBDC_CMD_READ_COMMAND_BYTE, 0, KBDC_RESPONSE_EXPECTED)) == -1) {
-			printk("KBDC_CMD_READ_COMMAND_BYTE failed: 0x%x\n", cbyte);
-		}
-		printk("cbyte after ps2p2 enable: %x\n", cbyte);
-
-		if ( (cbyte & KBDC_CONFBYTE_PS2_P2_DISABLED) == 0) {
-			printk("PS/2 2nd port exists (cbyte 0x%x)\n", cbyte);
-			is_dualport = 1;
-			atkbdc.nrports = 2;
-
-			// disable for now
-			if ((r = kbdc_send_cmd(KBDC_CMD_DISABLE_PS2_P2, 0, KBDC_NORESPONSE)) != 0) {
-				printk("KBDC_CMD_ENABLE_PS2_P2 failed, error: 0x%x\n", r);
-			}
-			if ((cbyte = kbdc_send_cmd(KBDC_CMD_READ_COMMAND_BYTE, 0, KBDC_RESPONSE_EXPECTED)) == -1) {
-				printk("KBDC_CMD_READ_COMMAND_BYTE failed: 0x%x\n", cbyte);
-			}
-			printk("cbyte after ps2p2 disable: %x\n", cbyte);
-		}
-	}
-
-	/* no PS/2 ports enabled by default */
-	ps2_p1 = ps2_p2 = 0;
-
-	/* prepare the configuration byte */
-	cbyte = KBDC_CONFBYTE_PS2_P1_DISABLED|KBDC_CONFBYTE_PS2_P2_DISABLED|KBDC_CONFBYTE_SYSFLAG_BAT;
-
-	/* step 6: interface tests */
-	if ((r = kbdc_send_cmd(KBDC_CMD_PS2_P1_TEST, 0, KBDC_RESPONSE_EXPECTED)) != 0) {
-		#ifdef DEBUG
-		printk("PS/2 port1 test failed, error: 0x%x\n", r);
-		#endif
-	} else {
-		ps2_p1 = 1;
+	/* step 6:	interface tests */
+	// port1
+	if ((r = kbdc_send_cmd(KBDC_CMD_PS2_P1_TEST, 0, KBDC_RESPONSE_EXPECTED)) == KBDC_CMD_RESPONSE_PORTTEST_OK) {
+		ps2_ports[0] = 1;
+		atkbdc.nports++;
 		cbyte |= KBDC_CONFBYTE_PS2_P1_INTERRUPT;
 		cbyte &= ~KBDC_CONFBYTE_PS2_P1_DISABLED;
 	}
-
-	if (is_dualport) {
-		if ((r = kbdc_send_cmd(KBDC_CMD_PS2_P2_TEST, 0, KBDC_RESPONSE_EXPECTED)) != 0) {
-			#ifdef DEBUG
-			printk("PS/2 port2 test failed, error: 0x%x\n", r);
-			#endif
-		} else {
-			ps2_p2 = 1;
-			cbyte |= KBDC_CONFBYTE_PS2_P2_INTERRUPT;
-			cbyte &= ~KBDC_CONFBYTE_PS2_P2_DISABLED;
-		}
+	else {
+		#ifdef DEBUG
+		printk("kbd: PS/2 port1 test failed, error: 0x%x\n", r);
+		#endif
+		cbyte |= KBDC_CONFBYTE_PS2_P1_DISABLED;
 	}
 
-	if ( (ps2_p1 || ps2_p2) == 0) {
-		printk("no devices found..giving up.\n");
-		return -1;
-	}
-
-	// XXX: Enable devices. For port send disable scanning, querry the kbd info, enable scanning
-	//	disable scanning: f5 is basically reset 
-
-	if ((r = kbde_poll_write_a(KBDE_CMD_RESPONSE_ECHO)) != KBDE_CMD_RESPONSE_ECHO) {
-		printk("ps/2 keyboard echo failed, error: 0x%x, status: 0x%x", r, kbdc_read_status());
-	}
-
-	// keyboard: identify
-	if(kbde_poll_write_a(KBDE_CMD_IDENTIFY) != KBDE_CMD_RESPONSE_ACK) {
-		printk("failed to identify keyboard\n");
+	// port2
+	if ((r = kbdc_send_cmd(KBDC_CMD_PS2_P2_TEST, 0, KBDC_RESPONSE_EXPECTED)) == KBDC_CMD_RESPONSE_PORTTEST_OK) {
+		ps2_ports[1] = 1;
+		atkbdc.nports++;
+		cbyte |= KBDC_CONFBYTE_PS2_P2_INTERRUPT;
+		cbyte &= ~KBDC_CONFBYTE_PS2_P2_DISABLED;
 	}
 	else {
-		// the 2nd id can be timeout error
-		id = kbde_poll_read();
-		id = kbde_poll_read() << 8 | id;
+		#ifdef DEBUG
+		printk("kbd: PS/2 port1 test failed, error: 0x%x\n", r);
+		#endif
+		cbyte |= KBDC_CONFBYTE_PS2_P1_DISABLED;
+	}
 
-		// match the id against known device types
-		atkbd.devtype = kbd_device_type[0];
-		for (i =0; i < KBD_DEVICE_TYPES; i++) {
-			if (id == kbd_device_type[i].kbd_device_id) {
-				atkbd.devtype = kbd_device_type[i];
-				break;
-			}
+	/* It's expected that keyboard is behind port 1. Some BIOSes even throw error if they don't find
+	   keyboard there. I'll do the same for now.
+	*/
+	if (!(ps2_ports[0])) {
+		return -1;
+	}
+
+	if((r = kbde_poll_write_a(KBDE_CMD_IDENTIFY)) != KBDE_CMD_RESPONSE_ACK) {
+		#ifdef DEBUG
+		printk("kbd: failed to send KBDE_CMD_IDENTIFY\n");
+		#endif
+	}
+
+	// the 2nd id can be timeout error
+	id = kbde_poll_read();
+	id = kbde_poll_read() << 8 | id;
+
+	atkbd.kbd_device_id = id;
+
+	// match the id against known device types
+	for (i =0; i < KBD_DEVICE_TYPES; i++) {
+		if (id == kbd_device_type[i].kbd_device_id) {
+			strcpy(devkbd.devname, kbd_device_type[i].kbd_name);
+			break;
 		}
-		printk("keyboard: %s (%x)\n", atkbd.devtype.kbd_name, id);
 	}
 
-	if ( ps2_p1 && ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P1, 0, KBDC_NORESPONSE)) != 0)) {
-		printk("KBDC_CMD_ENABLE_PS2_P1 failed, error: 0x%x\n", r);
-		return -1;
+	// assing to port
+	atkbdc.ports[0] = &devkbd;
+	devkbd.devtype = D_KEYBOARD;
+
+	/* step 7:	enable devices */
+	if ( ps2_ports[0] && ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P1, 0, KBDC_NORESPONSE)) != 0)) {
+		#ifdef DEBUG
+		printk("kbd: warning: KBDC_CMD_ENABLE_PS2_P1 failed, error: 0x%x\n", r);
+		#endif
 	}
 
-	if (ps2_p2 && ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P2, 0, KBDC_NORESPONSE)) != 0)) {
-		printk("KBDC_CMD_ENABLE_PS2_P2 failed, error: 0x%x\n", r);
-		return -1;
+	if ( ps2_ports[1] && ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P2, 0, KBDC_NORESPONSE)) != 0)) {
+		#ifdef DEBUG
+		printk("kbd: warning: KBDC_CMD_ENABLE_PS2_P2 failed, error: 0x%x\n", r);
+		#endif
 	}
 
 	cbyte &= ~KBDC_CONFBYTE_PS2_P1_TRANSLATION;
-	printk("final cbyte: %x\n", cbyte);
-
-	/* step 7:	enable devices */
 	if ((kbdc_send_cmd(KBDC_CMD_WRITE_COMMAND_BYTE, cbyte, KBDC_TWOBYTE_CMD|KBDC_NORESPONSE)) == -1) {
 		printk("warning: KBDC_CMD_WRITE_COMMAND_BYTE failed.\n");
 	}
 
-
-	// Note: we'll assume keyboard even if the keyboard is unknown
-	if(ps2_p1) {
-		r = kbde_poll_write_a(0xff);
-		printk("kbde response to 0xff command: %x\n", r);
-		r = kbde_poll_read();
-		printk("its result: %x\n", r);
-
+	/* step 8:	reset keyboard */
+	if((r = kbde_poll_write_a(KBDE_CMD_RESET)) != KBDE_CMD_RESPONSE_ACK) {
+		#ifdef DEBUG
+		printk("kbd: warning: KBDE_CMD_RESET failed (0x%x)\n", r);
+		#endif
 	}
 
-
-	/* to be removed
-	// XXX: I need to expand flags and add support for 2nd port ; status port bit5 indicate data is ready
-	//	from 2nd port
-
-	printk("trying to send command to 2nd port:\n");
-	if(ps2_p2) {
-		//if ((r = kbdc_send_cmd(0xD4, 0xff, KBDC_TWOBYTE_CMD|KBDC_NORESPONSE)) == -1) {
-		if ((r = kbdc_send_cmd(0xd4, 0xf4, KBDC_TWOBYTE_CMD|KBDC_RESPONSE_EXPECTED)) == -1) {
-			printk("warning: 0xd4 command failed: 0x%x\n",r);
-		}
-		else {
-			printk("ok: 0x%x\n", r);
-
-		}
+	// it takes time to update port 0x60 on real HW
+	r = kbde_poll_read();
+	if (r != KBDE_CMD_RESPONSE_BAT_OK) {
+		printk("kbd: warning: KBDE_CMD_RESET response: 0x%x\n", r);
 	}
-	*/
-
-	#ifdef DEBUG
-	printk("about to enable irq1\n");
-	#endif
 
 	set_interrupt_handler(kbd_isr_handler, 1);
 	clear_irq(1);
-
-	// XXX: just to test
-	//set_interrupt_handler(psm_isr_handler, 12);
-	//clear_irq(12);
-
-	printk("%s: exit\n", __func__);
 	return 0;
 }
 
 // handler exits to the irq_cleanup code
 void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
-	//printk("%s: attempting to get data\n", __func__);
 	uint8_t scancode = kbde_read();
 
-	printk("0x%x\n", scancode);
+//	printk("0x%x\n", scancode);
+
+	/* XXX:
+		I need to start simple. Maybe I should have focused on different
+		parts of the kernel fist but I decided to go this way.
+		There's no scheduling, no events yet. Even lack of memory management
+		is bad as these structures should have been dynamically allocated.
+
+		That being said I have kbd ISR that is reading scan codes. Here I can
+		read and empty command queue and do the logic of the kbd driver - update
+		keyboard state machine. Not ideal, but it's a start..
+	*/
 
 	atkbd.kbuf[atkbd.c_idx++] = scancode;
-	atkbd.flags = 1;		// ready for input
 
-	if (scancode == SCAN1_LSHIFT || scancode == SCAN1_RSHIFT) {
-		atkbd.special_keys = 1;
-	}
 	send_8259_EOI(1);
 }
 
-/*
-// XXX: this should be in its separate module ; using here just for tests
-void psm_isr_handler(__attribute__((unused)) struct trapframe* f) {
-	int r;
-	if ((r = kbdc_send_cmd(0xd4, 0xeb, KBDC_TWOBYTE_CMD|KBDC_RESPONSE_EXPECTED)) == -1) {
-		printk("warning: 0xd4/0xeb command failed: 0x%x\n",r);
+void ps2c_info() {
+	int i;
+	printk("%s: %d ports\n", atkbdc.devname, atkbdc.nports);
+
+	for (i =0; i < 2; i++) {
+		if (atkbdc.ports[i] != NULL ) {
+			printk("kbd: port %d: %s: type: %d\n", i+1, atkbdc.ports[i]->devname, atkbdc.ports[i]->devtype);
+		}
 	}
-
-	r = kbde_read();
-	printk("%s: %x\n", __func__, r);
-
-	send_8259_EOI(12);
 }
-*/
+
+void dbg_kbd_dumpbuf() {
+	int i;
+	printk("kbuf: c_idx: %d, r_idx: %d\n", atkbd.c_idx, atkbd.r_idx);
+	for (i =0; i < 256; i++) {
+		printk("%x ", atkbd.kbuf[i]);
+
+		if( (i+1) % 32 == 0) printk("\n");
+	}
+	printk("\n");
+}
