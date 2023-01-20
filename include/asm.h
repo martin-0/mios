@@ -197,4 +197,8 @@ static inline void halt_cpu(void) {
 	asm volatile ("hlt");
 }
 
+static inline void halt(void) {
+	asm volatile("cli;hlt");
+}
+
 #endif /* HAVE_ASM_H */
