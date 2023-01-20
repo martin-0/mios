@@ -47,6 +47,7 @@ _kernel_entry:
 
 	// install keyboard driver
 	call __init_kbd_module
+	call ps2c_info
 
 	sti 					/* enable interrupts */
 
