@@ -15,8 +15,9 @@ uint16_t* ivga_text = (uint16_t*)VGA_SCREEN;		// XXX: probably not needed as glo
 //	for the time being it's ok
 
 // current cursor position
-unsigned char cursx, cursy;
-unsigned char COLS = 80, ROWS = 25;
+//unsigned char cursx, cursy;
+int cursx, cursy;
+int COLS = 80, ROWS = 25;
 
 void puts(char* s) {
 	char c;
@@ -71,17 +72,15 @@ void cputc(char c, char attrib) {
 			break;
 
 	case 0x7f:
-	case 0x08:	// XXX: we have cursx defined as unsigned char, not ok
-			//	i can't test easily now against curs* < 0
-			// TODO: change cursxy to int
-			cursx--; 	// if it was 0 it will be 255
-
-			if ((signed char)cursx < 0 ) {
-				cursx = COLS;
-				cursy--;
-				if (cursy < 0) cursy = 0;
+			if (--cursx < 0 ) {
+				cursx = 0;
 			}
-			*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | 0x20;
+			c = ' '; // clear with space
+			*(ivga_text + ( cursy * COLS + cursx)) = (attrib << 8 ) | c;
+
+			if (com1_console) {
+				poll_uart_write(c, com1_console);
+			}
 			goto exit_setcursor;
 			break;
 	}
