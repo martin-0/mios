@@ -18,6 +18,8 @@ extern uart_state_t com0_state;
 
 int getc() {
 	int c;
+
+	c = 0; // silence gcc warning while kbd is not properly working
 	// XXX: we should use mutex here!!
 	while(1) {
 		if (atkbd.flags & 1) {
@@ -27,7 +29,9 @@ int getc() {
 
 			atkbd.flags &= ~1;
 			asm volatile("sti");
-			goto out;
+
+			// XXX	basicaly don't produce any character from keyboard yet
+			continue;
 		}
 
 		if (com0_state.flags & 1) {
@@ -38,42 +42,44 @@ int getc() {
 		asm volatile("pause");
 	}
 out:
-	// print ascii
+	/*
 	if (c > 0x1f && c < 0x80)
 		putc(c);
+	*/
 	return c;	
 }
 
-// XXX: one by one reading into str
-// read string up to n chars
-int read_string(char* buf, size_t n) {
+/* reads up to n-1 characters, 0-terminates the string */
+int read_string(char* buf, int n) {
 	char c;
-	size_t i = 0;
+	int i;
 
+	if (n < 1) return 0;
+
+	n--;
+	i = 0;
 	while(i < n) {
 		c = getc();
 
 		// XXX: why is c over serial line sending \r only ?
 		if ( c == 0x0d || c == 0x0a ) {
-			*(buf+i) = '\0';
 			goto out;
 		}
 
 		// backspace
 		if (c == 0x7f || c == 0x08 ) {
-			if (i > 0) i--;
-			*(buf+i) = '\0';
+			if (--i < 0) i=0;
+			putc(c);
 			continue;
 		}
 
+		putc(c);
 		*(buf+i) = c;
 		i++;
 	}
 
-	if (!i) return 0;
-
-	*(buf+i-1) = '\0';
 out:
+	*(buf+i) = '\0';
 	return i;
 }
 

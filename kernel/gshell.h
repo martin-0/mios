@@ -13,6 +13,6 @@ typedef struct sc1_line {
 #define         MAX_SC1_LINES           255             // sizeof(scancode)
 
 int getc();
-int read_string(char* buf, size_t n);
+int read_string(char* buf, int n);
 
 #endif /* ifndef HAVE_GSHELL_H */
