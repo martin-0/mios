@@ -14,12 +14,17 @@
 #define	DEVNAME_SIZE	32
 #define	MAXLEN_DEVNAME	(DEVNAME_SIZE-1)
 
+typedef enum devtype {
+	D_KEYBOARD = 0,
+	D_MOUSE
+} e_devtype_t;
+
 /* abstract form of device structure */
 typedef struct device {
 	char devname[DEVNAME_SIZE];
+	e_devtype_t devtype;
 	void* dev;
 } device_t;
-
 
 
 #endif /* ifndef HAVE_DEVICE_H */
