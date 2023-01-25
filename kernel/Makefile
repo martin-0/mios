@@ -50,7 +50,7 @@ pic.o: pic.c pic.h
 mm.o: mm.c
 	$(CC) $(CFLAGS) mm.c -c -o $(OBJDIR)/mm.o
 
-kbd.o: kbd.c kbd.h
+kbd.o: kbd.c kbd.h 
 	$(CC) $(CFLAGS) kbd.c -c -o $(OBJDIR)/kbd.o
 
 uart.o: uart.c uart.h

@@ -5,20 +5,10 @@
 
 #include "asm.h"
 #include "device.h"
-
-// XXX: this should be driver specific..
-#define	SCAN1_LSHIFT		0x2a
-#define	SCAN1_RSHIFT		0x36
-#define	SCAN1_LCTRL		0x1d			// XXX: RCtrl is E0 1D, for our purposes _now_ it's ok
-#define	SCAN1_LATLT		0x38			// XXX: LAlt is E0 38
-#define	SCAN1_BACKSPACE		0x0e
-#define	SCAN1_ESC		0x01
-#define	SCAN1_ENTER		0x1c
-
+#include "types.h"
 
 #define	KBDC_NAME		"kbdc"
 #define	KBDC_INTERNAL_BUFSIZE	16
-#define	MAX_COMMAND_QUEUE	32
 
 /* to define list of known keyboards and its ids */
 struct kbd_devtype_name {
@@ -26,46 +16,57 @@ struct kbd_devtype_name {
 	char* kbd_name;
 };
 
-typedef enum e_kbdc_port {
-	PS2_PORT1 = 1,
-	PS2_PORT2 = 2
-}e_kbdc_port_t;
-
-typedef struct kbdc_command {
-	uint8_t cmd[2];
-	int16_t response;
-	uint8_t flags;
-	e_kbdc_port_t dst_port;
-} kbdc_command_t;
+struct kbdc_command {
+	uint8_t cmd[2];				// LSB order
+	uint8_t active_cmd_idx:1;		// active command
+	int16_t response;			// last command response
+	uint8_t flags;				// expect response
+	int8_t retries;				// current retries
+	enum e_kbd_cmd_status {
+		S_KCMD_INQUEUE = 0,		// in queue to be picked up by command queue handler
+		S_KCMD_AWAITING_ACK,		// command sent, ACK is expected
+		S_KCMD_AWAITING_DATA,		// waiting for data from command
+		S_KCMD_DONE,
+		S_KCMD_FAILED,
+		S_KCMD_RETRYING,
+	} status;
+	enum e_kbdc_port {
+		PS2_CONTROLELR = 0,
+		PS2_PORT1,
+		PS2_PORT2,
+		PS2_ENCODER
+	} dst_port;
+};
 
 
 struct kbdc {
 	char devname[DEVNAME_SIZE];
 	uint8_t	nports;
-	uint8_t at_ctrl:1;					// AT compatible controller
-
-	kbdc_command_t cmd_q[MAX_COMMAND_QUEUE];
-	uint8_t c_idx;
-	uint8_t r_idx;
-	uint8_t qlen;
-
+	unsigned int at_ctrl:1;					// AT compatible controller
+	int8_t cmd_in_progress;
 	device_t* ports[2];
+
+	DEFINE_RING32(cmd_q, struct kbdc_command);		// command queue
+	DEFINE_RING32(cmd_rep, unsigned char);			// NOTE: for debugging purposes
 };
 
 struct kbd {
 	uint16_t kbd_device_id;
 	uint8_t special_keys;					// 1-shift, 2-ctrl, 3-alt
-	uint8_t ledstate:3;
+	uint8_t ledstate:3;					// numlock, capslock, screnlock
 	int flags;						// XXX: translated scancodes; ? something else? separate vars ?
+	unsigned char lc;
 
-	#define	KBD_RBUF_MAX	256
-	unsigned char kbuf[KBD_RBUF_MAX];
-	uint8_t c_idx;
-	uint8_t r_idx;
+	DEFINE_RING32(kbuf, unsigned char);
 };
 
 int __init_kbd_module();
 void kbd_isr_handler(struct trapframe* f);
+
+
+#define	SENDCMD_NORESPONSE			0x0
+#define	SENDCMD_RESPONSE_EXPECTED		0x1
+#define	SENDCMD_TWOBYTE				0x2
 
 int kbde_poll_read();
 int kbde_poll_write(uint8_t cmd);
@@ -73,6 +74,7 @@ int kbde_poll_write_a(uint8_t cmd);
 
 int kbdc_poll_write(uint8_t cmd);
 int kbdc_send_cmd(uint8_t cmd, uint8_t nexbyte, int flags);
+int kbdc_handle_command();
 
 /* I/O port
 
@@ -101,7 +103,7 @@ Note: while port 0x60 is used for direct communication with keyboard it still go
 
 */
 
-#define	KBDC_RETRY_ATTEMPTS			3
+#define	KBD_RETRY_ATTEMPTS			3
 
 #define	KBDE_DATA_PORT				0x60
 #define	KBDC_READ_STATUS_PORT			0x64
@@ -124,11 +126,9 @@ Note: while port 0x60 is used for direct communication with keyboard it still go
 #define	KBDC_CONFBYTE_PS2_P2_DISABLED		0x20		// bit5: 1=disabled, 0=enabled
 #define	KBDC_CONFBYTE_PS2_P1_TRANSLATION	0x40		// bit6: 1=enabled, 0=disabled
 
-// PS/2 commands
+// PS/2 controller commands
 #define	KBDC_CMD_READ_COMMAND_BYTE		0x20		// response:	ctrl conf byte
 #define	KBDC_CMD_WRITE_COMMAND_BYTE		0x60		//		1st byte of internal RAM as standard, undefined
-
-// These won't work on AT connector
 #define KBDC_CMD_DISABLE_PS2_P2			0xa7		//		none
 #define KBDC_CMD_ENABLE_PS2_P2			0xa8		//		none
 #define	KBDC_CMD_PS2_P2_TEST			0xa9		//		0x00: ok, 1,2,3,4: lines stuck
@@ -142,22 +142,30 @@ Note: while port 0x60 is used for direct communication with keyboard it still go
 #define	KBDC_CMD_RESPONSE_SELFTEST_OK		0x55
 #define	KBDC_CMD_RESPONSE_SELFTEST_FAILED	0xfc
 
-// kbdc_write_command_2() flags
-#define	KBDC_ONEBYTE_CMD			0x0
-#define	KBDC_TWOBYTE_CMD			0x1
-#define	KBDC_NORESPONSE				0x0
-#define	KBDC_RESPONSE_EXPECTED			0x2
+#define	KFLAG_WAIT_ACK				0x1		// command to be ACKed by controller
+#define	KFLAG_WAIT_DATA				0x2		// controller should send data
+#define	KFLAG_TWOBYTE_CMD			0x4
+
+#define	KCMD_AWAITING_ACK(cmd)			(cmd->flags & KFLAG_WAIT_ACK)
+#define	KCMD_AWAITING_DATA(cmd)			(cmd->flags & KFLAG_WAIT_DATA)
+#define	KCMD_IS_TWOBYTE(cmd)			(cmd->flags & KFLAG_TWOBYTE_CMD)
 
 // encoder commands
 #define	KBDE_CMD_IDENTIFY			0xf2
 #define	KBDE_CMD_ENABLE				0xf4
 #define	KBDE_CMD_DISABLE			0xf5
 #define	KBDE_CMD_RESPONSE_BAT_OK		0xaa
+#define	KBDE_CMD_SETLED				0xed
+#define	KBDE_CMD_ECHO				0xee
 #define	KBDE_CMD_RESPONSE_ECHO			0xee
 #define	KBDE_CMD_RESPONSE_ACK			0xfa
 #define	KBDE_CMD_RESPONSE_BAT_ERR		0xfc
 #define	KBDE_CMD_RESPONSE_RESEND		0xfe
 #define	KBDE_CMD_RESET				0xff
+
+#define	KBDE_LED_SCROLLLOCK			0x1
+#define	KBDE_LED_NUMLOCK			0x2
+#define	KBDE_LED_CAPSLOCK			0x4
 
 // debug
 void dbg_kbd_dumpbuf();

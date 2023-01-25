@@ -86,7 +86,7 @@ int kbde_poll_write(uint8_t cmd) {
 		// XXX: what about TOCTOU issue ? If I call these functions from isr handler it should be ok
 		//	but what if something outside of isr tries to r/w to this port?
 		if (KBDE_WRITE_READY(s)) {
-			outb(cmd, KBDE_DATA_PORT);
+			outb_p(cmd, KBDE_DATA_PORT);
 			return 0;
 		}
 	}
@@ -152,14 +152,14 @@ int kbdc_send_cmd(uint8_t cmd, uint8_t nextbyte, int flags) {
 	}
 
 	/* 2-byte command */
-	if (flags & KBDC_TWOBYTE_CMD) {
+	if (flags & SENDCMD_TWOBYTE) {
 		if ((r=kbde_poll_write(nextbyte)) == -1) {
 			printk("%s: failed to write next command byte 0x%x: 0x%x\n", __func__, nextbyte, r);
 			return -1;
 		}
 	}
 
-	if (flags & KBDC_RESPONSE_EXPECTED) {
+	if (flags & SENDCMD_RESPONSE_EXPECTED) {
 		r = kbde_poll_read();
 		return r;
 	}
@@ -198,14 +198,14 @@ int __init_kbd_module() {
 		during initialization ports are kept disabled.
 	*/
 
-	if ((r = kbdc_send_cmd(KBDC_CMD_DISABLE_PS2_P1, 0, KBDC_NORESPONSE)) != 0) {
+	if ((r = kbdc_send_cmd(KBDC_CMD_DISABLE_PS2_P1, 0, SENDCMD_NORESPONSE)) != 0) {
 		#ifdef DEBUG
 		printk("kbd: KBDC_CMD_DISABLE_PS2_P1 failed, error: 0x%x\n", r);
 		#endif
 		return -1;
 	}
 
-	if ((r = kbdc_send_cmd(KBDC_CMD_DISABLE_PS2_P2, 0, KBDC_NORESPONSE)) != 0) {
+	if ((r = kbdc_send_cmd(KBDC_CMD_DISABLE_PS2_P2, 0, SENDCMD_NORESPONSE)) != 0) {
 		#ifdef DEBUG
 		printk("kbd: KBDC_CMD_DISABLE_PS2_P2 failed, error: 0x%x\n", r);
 		#endif
@@ -218,7 +218,7 @@ int __init_kbd_module() {
 	}
 
 	/* step 3:	read the control byte from controller and disable port interrupts and translation */
-	if ((cbyte = kbdc_send_cmd(KBDC_CMD_READ_COMMAND_BYTE, 0, KBDC_RESPONSE_EXPECTED)) == -1) {
+	if ((cbyte = kbdc_send_cmd(KBDC_CMD_READ_COMMAND_BYTE, 0, SENDCMD_RESPONSE_EXPECTED)) == -1) {
 		printk("kbd: KBDC_CMD_READ_COMMAND_BYTE failed: 0x%x\n", cbyte);
 		return -1;
 	}
@@ -226,7 +226,7 @@ int __init_kbd_module() {
 	// save for later
 	orig_cbyte = cbyte;
 
-	/* if bit5 was not toggled we are using AT connector */
+	/* if bit5 was not toggled we are using AT controller */
 	if ( (cbyte & KBDC_CONFBYTE_PS2_P1_DISABLED) == 0 ) {
 		atkbdc.at_ctrl = 1;
 		exp_ctrl_response = 0;
@@ -238,7 +238,7 @@ int __init_kbd_module() {
 	/* disable port interrupts and translation, allow selftest even if this command fails */
 	cbyte &= ~(KBDC_CONFBYTE_PS2_P1_INTERRUPT|KBDC_CONFBYTE_PS2_P2_INTERRUPT|KBDC_CONFBYTE_PS2_P1_TRANSLATION);
 
-	if ((kbdc_send_cmd(KBDC_CMD_WRITE_COMMAND_BYTE, cbyte, KBDC_TWOBYTE_CMD|KBDC_NORESPONSE)) == -1) {
+	if ((kbdc_send_cmd(KBDC_CMD_WRITE_COMMAND_BYTE, cbyte, SENDCMD_TWOBYTE|SENDCMD_NORESPONSE)) == -1) {
 		printk("kbd: WARNING: KBDC_CMD_WRITE_COMMAND_BYTE failed, proceeding anyway.\n");
 	}
 
@@ -247,11 +247,11 @@ int __init_kbd_module() {
 		If there was a problem with keyboard POST test would probably catch it.
 		Selftest is important enough to make an effort here and retry few times before giving up.
 	*/
-	for (i =0; i < KBDC_RETRY_ATTEMPTS; i++) {
-		if ((r = kbdc_send_cmd(KBDC_CMD_PS2_CTRL_SELFTEST, 0, KBDC_RESPONSE_EXPECTED)) == exp_ctrl_response) {
+	for (i =0; i < KBD_RETRY_ATTEMPTS; i++) {
+		if ((r = kbdc_send_cmd(KBDC_CMD_PS2_CTRL_SELFTEST, 0, SENDCMD_RESPONSE_EXPECTED)) == exp_ctrl_response) {
 			break;
 		}
-		printk("kbd: PS/2 controller selftest failed (0x%x), %d of %d\n", r, i, KBDC_RETRY_ATTEMPTS);
+		printk("kbd: PS/2 controller selftest failed (0x%x), %d of %d\n", r, i, KBD_RETRY_ATTEMPTS);
 	}
 
 	if (r != exp_ctrl_response) {
@@ -264,7 +264,7 @@ int __init_kbd_module() {
 
 	/* step 6:	interface tests */
 	// port1
-	if ((r = kbdc_send_cmd(KBDC_CMD_PS2_P1_TEST, 0, KBDC_RESPONSE_EXPECTED)) == KBDC_CMD_RESPONSE_PORTTEST_OK) {
+	if ((r = kbdc_send_cmd(KBDC_CMD_PS2_P1_TEST, 0, SENDCMD_RESPONSE_EXPECTED)) == KBDC_CMD_RESPONSE_PORTTEST_OK) {
 		ps2_ports[0] = 1;
 		atkbdc.nports++;
 		cbyte |= KBDC_CONFBYTE_PS2_P1_INTERRUPT;
@@ -278,7 +278,7 @@ int __init_kbd_module() {
 	}
 
 	// port2
-	if ((r = kbdc_send_cmd(KBDC_CMD_PS2_P2_TEST, 0, KBDC_RESPONSE_EXPECTED)) == KBDC_CMD_RESPONSE_PORTTEST_OK) {
+	if ((r = kbdc_send_cmd(KBDC_CMD_PS2_P2_TEST, 0, SENDCMD_RESPONSE_EXPECTED)) == KBDC_CMD_RESPONSE_PORTTEST_OK) {
 		ps2_ports[1] = 1;
 		atkbdc.nports++;
 		cbyte |= KBDC_CONFBYTE_PS2_P2_INTERRUPT;
@@ -323,37 +323,50 @@ int __init_kbd_module() {
 	devkbd.devtype = D_KEYBOARD;
 
 	/* step 7:	enable devices */
-	if ( ps2_ports[0] && ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P1, 0, KBDC_NORESPONSE)) != 0)) {
+	if ( ps2_ports[0] && ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P1, 0, SENDCMD_NORESPONSE)) != 0)) {
 		#ifdef DEBUG
 		printk("kbd: warning: KBDC_CMD_ENABLE_PS2_P1 failed, error: 0x%x\n", r);
 		#endif
 	}
 
-	if ( ps2_ports[1] && ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P2, 0, KBDC_NORESPONSE)) != 0)) {
+	if ( ps2_ports[1] && ((r = kbdc_send_cmd(KBDC_CMD_ENABLE_PS2_P2, 0, SENDCMD_NORESPONSE)) != 0)) {
 		#ifdef DEBUG
 		printk("kbd: warning: KBDC_CMD_ENABLE_PS2_P2 failed, error: 0x%x\n", r);
 		#endif
 	}
 
 	cbyte &= ~KBDC_CONFBYTE_PS2_P1_TRANSLATION;
-	if ((kbdc_send_cmd(KBDC_CMD_WRITE_COMMAND_BYTE, cbyte, KBDC_TWOBYTE_CMD|KBDC_NORESPONSE)) == -1) {
+	if ((kbdc_send_cmd(KBDC_CMD_WRITE_COMMAND_BYTE, cbyte, SENDCMD_TWOBYTE|SENDCMD_NORESPONSE)) == -1) {
 		printk("warning: KBDC_CMD_WRITE_COMMAND_BYTE failed.\n");
 	}
 
-	/* step 8:	reset keyboard */
-	if((r = kbde_poll_write_a(KBDE_CMD_RESET)) != KBDE_CMD_RESPONSE_ACK) {
-		#ifdef DEBUG
-		printk("kbd: warning: KBDE_CMD_RESET failed (0x%x)\n", r);
-		#endif
-	}
+	/* step 8:	reset keyboard
 
-	// it takes time to update port 0x60 on real HW
-	r = kbde_poll_read();
-	if (r != KBDE_CMD_RESPONSE_BAT_OK) {
-		printk("kbd: warning: KBDE_CMD_RESET response: 0x%x\n", r);
-	}
+		Keyboard reset command is put into queue and will be handled in queue.
+		Command queue is irq1 driven.
+	*/
+
+/*
+	atkbdc.cmd_q[atkbdc.cqi].cmd[0] = KBDE_CMD_RESET;
+	atkbdc.cmd_q[atkbdc.cqi].flags = SENDCMD_RESPONSE_EXPECTED;
+	atkbdc.cmd_q[atkbdc.cqi].dst_port = PS2_ENCODER;
+	atkbdc.cmd_q[atkbdc.cqi].status = S_KCMD_INQUEUE;
+	atkbdc.cq_idx++;
+*/
+	struct kbdc_command* nc = RING32_GET_FREE(&atkbdc.cmd_q);
+
+	// test of get current scancode command
+	nc->cmd[0] = 0xf0;
+	nc->cmd[1] = 0;
+	nc->flags = KFLAG_WAIT_ACK|KFLAG_TWOBYTE_CMD|KFLAG_WAIT_DATA;
+	nc->dst_port = PS2_ENCODER;
+	nc->status = S_KCMD_INQUEUE;
+	nc->retries = 0;
+	RING32_STORE(&atkbdc.cmd_q, *nc);
 
 	set_interrupt_handler(kbd_isr_handler, 1);
+
+	kbdc_handle_command();
 	clear_irq(1);
 	return 0;
 }
@@ -362,7 +375,7 @@ int __init_kbd_module() {
 void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
 	uint8_t scancode = kbde_read();
 
-//	printk("0x%x\n", scancode);
+	printk("isr: 0x%x, cmd in progress: %d\n", scancode, atkbdc.cmd_in_progress);
 
 	/* XXX:
 		I need to start simple. Maybe I should have focused on different
@@ -373,11 +386,176 @@ void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
 		That being said I have kbd ISR that is reading scan codes. Here I can
 		read and empty command queue and do the logic of the kbd driver - update
 		keyboard state machine. Not ideal, but it's a start..
+
+	   XXX:
+		Current lack of kbd driver is problematic here. I can't buffer scancodes
+		without doing anything with them if I want to service keyboard commands.
+		Maybe I can keep two buffers - one for controller and one for driver. Anything
+		that is not command-related will be sent to driver to deal with. 
 	*/
 
-	atkbd.kbuf[atkbd.c_idx++] = scancode;
+	// Right now we don't know if the scancode is actual scancode or answer to the cmd
 
+	// are we servicing a command ?
+	if (atkbdc.cmd_in_progress) {
+		// reply triggered by command
+		RING32_STORE(&atkbdc.cmd_rep, scancode);
+		kbdc_handle_command();
+		goto out;
+	}
+
+	// command is not active, we did receive interrupt, store the code
+	// XXX: 
+	atkbd.lc = atkbd.kbuf.buf[atkbd.kbuf.ci-1];
+	RING32_STORE(&atkbd.kbuf, scancode);
+	printk("isr: lastchar: 0x%x\n", atkbd.lc);
+
+	// do we have something to service?
+	if (RING32_DATA_READY(&atkbdc.cmd_q)) {
+		kbdc_handle_command();
+		goto out;
+	}
+
+	// numlock
+	if (scancode == 0x77 && atkbd.lc != 0xf0) {
+		printk("isr: numlock trigger\n");
+		struct kbdc_command* nc = RING32_GET_FREE(&atkbdc.cmd_q);
+
+		atkbd.ledstate ^= KBDE_LED_NUMLOCK;	// flip the state of numlock
+
+		nc->cmd[0] = KBDE_CMD_SETLED;
+		nc->cmd[1] = atkbd.ledstate;
+		nc->flags = KFLAG_TWOBYTE_CMD|KFLAG_WAIT_ACK;
+		nc->dst_port = PS2_ENCODER;
+		nc->status = S_KCMD_INQUEUE;
+		RING32_STORE(&atkbdc.cmd_q, *nc);
+
+		kbdc_handle_command();
+	}
+
+out:
 	send_8259_EOI(1);
+}
+
+int kbdc_handle_command() {
+	struct kbdc_command* cmd = RIGG32_GET_UNREAD(&atkbdc.cmd_q);
+
+	switch(cmd->dst_port) {
+	case PS2_ENCODER:
+		switch(cmd->status) {
+		case S_KCMD_RETRYING:
+		case S_KCMD_INQUEUE:
+				printk("S_KCMD_INQUEUE: %d: 0x%x, sending out\n", cmd->retries, cmd->cmd[cmd->active_cmd_idx]);
+				cmd->response = kbde_poll_write(cmd->cmd[cmd->active_cmd_idx]);
+
+				if (cmd->response == -1) {
+					if (cmd->retries++ > KBD_RETRY_ATTEMPTS) {
+						#ifdef DEBUG
+							printk("command 0x%x failed\n", cmd->cmd[cmd->active_cmd_idx]);
+						#endif
+						goto fail;
+					}
+					printk("S_KCMD_INQUEUE: command failed: 0x%x, will retry\n", cmd->cmd[cmd->active_cmd_idx]);
+					goto out;
+				}
+
+				// XXX: command was sent to the device but encoder could still send scancodes
+				//	before registering a command
+	
+				if(KCMD_AWAITING_ACK(cmd))
+					cmd->status = S_KCMD_AWAITING_ACK;
+				else
+					cmd->status = S_KCMD_AWAITING_DATA;
+
+				atkbdc.cmd_in_progress = 1;
+				break;
+
+		case S_KCMD_AWAITING_ACK:
+				printk("S_KCMD_AWAITING_ACK: ");
+				cmd->response = RING32_FETCH(&atkbdc.cmd_rep);
+
+				// we were awaiting ACK and got something else than resend or ACK
+				if (cmd->response != KBDE_CMD_RESPONSE_ACK) {
+					// XXX: handle the resend at least ? 
+					#ifdef DEBUG
+					printk("S_KCMD_AWAITING_ACK: command 0x%x failed: 0x%x != 0x%x\n", cmd->cmd[cmd->active_cmd_idx], cmd->response, KBDE_CMD_RESPONSE_ACK);
+					#endif
+					goto fail;
+				}
+
+				// depending on cmd->flags we may do the following:
+				//	two byte commmand: send another byte
+				//	expect data after ack
+				//	nothing - finished command
+
+
+				// ACK received but it is two-byte command
+				if (KCMD_IS_TWOBYTE(cmd)) {
+					printk("twobyte command\n");
+					cmd->active_cmd_idx++;
+					cmd->retries = 0;
+
+					cmd->response = kbde_poll_write(cmd->cmd[cmd->active_cmd_idx]);
+
+					// we are still awaiting ACK
+					cmd->flags &= ~(KFLAG_TWOBYTE_CMD);
+					printk("2nd command result(0 expected): %x\n", cmd->response);
+					break;
+				}
+
+				// ACK received, we need data
+				if (KCMD_AWAITING_DATA(cmd)) {
+					printk("S_KCMD_AWAITING_ACK: awaiting data\n");
+					cmd->status = S_KCMD_AWAITING_DATA;
+					break;
+				}
+
+				// ACK received, no more data, not a two byte command. we are done.
+				printk("no response expected for command 0x%x, flags: 0x%x\n", cmd->cmd[cmd->active_cmd_idx], cmd->flags);
+				RING32_RI_ADVANCE(&atkbdc.cmd_q);
+				atkbdc.cmd_in_progress = 0;
+				cmd->status = S_KCMD_DONE;
+				break;
+
+
+		case S_KCMD_AWAITING_DATA:
+				printk("S_KCMD_AWAITING_DATA: ");
+				cmd->response = RING32_FETCH(&atkbdc.cmd_rep);
+				printk("S_KCMD_AWAITING_ANSWER: got response: %x\n", cmd->response);
+
+				// XXX: does encoder have 2-byte command too ?
+
+				cmd->status = S_KCMD_DONE;
+				RING32_RI_ADVANCE(&atkbdc.cmd_q);
+
+				atkbdc.cmd_in_progress = 0;
+				return cmd->response;
+				break;
+
+		default:
+				#ifdef DEBUG
+				printk("%s: invalid command state %d, dropping command\n", __func__, cmd->status);
+				#endif
+				goto fail;
+				break;
+		}
+		break; // PS2_ENCODER
+
+	default:
+		#ifdef DEBUG
+		printk("kbd: unknown command destination: 0x%x\n", cmd->dst_port);
+		#endif
+	}
+
+	return 0;
+
+fail:
+	cmd->status = S_KCMD_FAILED;
+	atkbdc.cmd_in_progress = 0;
+	RING32_RI_ADVANCE(&atkbdc.cmd_q);
+
+out:
+	return -1;
 }
 
 void ps2c_info() {
@@ -391,13 +569,17 @@ void ps2c_info() {
 	}
 }
 
+// just to see what's happening
 void dbg_kbd_dumpbuf() {
 	int i;
-	printk("kbuf: c_idx: %d, r_idx: %d\n", atkbd.c_idx, atkbd.r_idx);
-	for (i =0; i < 256; i++) {
-		printk("%x ", atkbd.kbuf[i]);
 
-		if( (i+1) % 32 == 0) printk("\n");
+	printk("kbuf: ci: %d, ri: %d\n", atkbd.kbuf.ci, atkbd.kbuf.ri);
+	for (i =0; i < 32; i++) {
+		printk("%x ", atkbd.kbuf.buf[i]);
+	}
+	printk("\ncbuf: ci: %d, ri: %d\n", atkbdc.cmd_rep.ci, atkbdc.cmd_rep.ri);
+	for (i =0; i < 32; i++) {
+		printk("%x ", atkbdc.cmd_rep.buf[i]);
 	}
 	printk("\n");
 }
