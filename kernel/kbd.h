@@ -10,7 +10,7 @@
 #define	KBDC_NAME		"kbdc"
 #define	KBDC_INTERNAL_BUFSIZE	16
 
-/* to define list of known keyboards and its ids */
+/* to define the list of known keyboards and its ids */
 struct kbd_devtype_name {
 	uint16_t kbd_device_id;
 	char* kbd_name;
@@ -18,13 +18,14 @@ struct kbd_devtype_name {
 
 struct kbdc_command {
 	uint8_t cmd[2];				// LSB order
-	uint8_t active_cmd_idx:1;		// active command
 	int16_t response;			// last command response
 	uint8_t flags;				// expect response
 	int8_t retries;				// current retries
 	enum e_kbd_cmd_status {
-		S_KCMD_INQUEUE = 0,		// in queue to be picked up by command queue handler
-		S_KCMD_AWAITING_ACK,		// command sent, ACK is expected
+		S_KCMD_READY= 0,		// in queue to be picked up by command queue handler
+		S_KCMD_TRIGGERED,		// command sent, no error during sending
+		S_KCMD_CONFIRMED,		// we got the ack, command is confirmed
+		S_KCMD_AWAITING_ACK,		// command is waiting for ACK other than the first one
 		S_KCMD_AWAITING_DATA,		// waiting for data from command
 		S_KCMD_DONE,
 		S_KCMD_FAILED,
@@ -38,7 +39,6 @@ struct kbdc_command {
 	} dst_port;
 };
 
-
 struct kbdc {
 	char devname[DEVNAME_SIZE];
 	uint8_t	nports;
@@ -47,7 +47,7 @@ struct kbdc {
 	device_t* ports[2];
 
 	DEFINE_RING32(cmd_q, struct kbdc_command);		// command queue
-	DEFINE_RING32(cmd_rep, unsigned char);			// NOTE: for debugging purposes
+	DEFINE_RING32(sbuf, unsigned char);			// scancode buffer
 };
 
 struct kbd {
@@ -56,13 +56,13 @@ struct kbd {
 	uint8_t ledstate:3;					// numlock, capslock, screnlock
 	int flags;						// XXX: translated scancodes; ? something else? separate vars ?
 	unsigned char lc;
+	int active_scanset;
 
 	DEFINE_RING32(kbuf, unsigned char);
 };
 
 int __init_kbd_module();
 void kbd_isr_handler(struct trapframe* f);
-
 
 #define	SENDCMD_NORESPONSE			0x0
 #define	SENDCMD_RESPONSE_EXPECTED		0x1
@@ -75,6 +75,51 @@ int kbde_poll_write_a(uint8_t cmd);
 int kbdc_poll_write(uint8_t cmd);
 int kbdc_send_cmd(uint8_t cmd, uint8_t nexbyte, int flags);
 int kbdc_handle_command();
+
+/* Keyboard encoder commands
+	ACK	- encoder sends ACK
+	IN	- encoder expects input byte
+	RSP	- encoder sends answer to a command (not ACK)
+
+	 DESCRIPTION			COMMAND		ACK	IN	RESP
+	----------------------------------------------------------------------
+	Set LED				0xED		Y	Y	-
+	Echo				0xEE		-	-	Y
+	Set alt scancode		0xF0		Y	Y	- *
+		If IN is 0 		0xF0		Y	0	Y
+	Read ID				0xF2		Y	-	Y (2B)
+	Set autorepeat rate/delay	0xF3		Y	Y	-
+	Enable keyboard			0xF4		Y	-	-
+	Disable keyboard		0xF5		Y	-	-
+	Set default			0xF6		Y	-	-
+	Set all keys to autorepeat	0xF7		Y	-	-
+	Set all keys to make/break	0xF8		Y	-	-
+	Set all keys to make		0xF9		Y	-	-
+	Set all keys to auto/make/break	0xFA		Y	-	-
+	Set key to autorepeat		0xFB		Y	Y	-
+	Set key to make/break		0xFC		Y	Y	-
+	Set key to make			0xFD		Y	Y	-
+	Reset				0xFF		Y	-	Y
+
+	 Asnwers to commands
+	---------------------------------------------------------------
+	Internal buffer overrun		0x00
+	Keyboard ID			0x83AB (enabled translation will translate return IDs)
+	BAT test ok			0xAA
+	Echo OK				0xEE
+	ACK				0xF0
+	BAT test failed			0xFC
+	Diagnostic failure		0xFD
+	Request to resend command	0xFE
+	Key error			0xFF
+
+	Notes:
+		Only Echo command doesn't reply with the ACK
+		Alt scancode can send response based on input
+
+	https://helppc.netcore2k.net/hardware/keyboard-commands
+	Holtek's HT82K28A keyboard manual
+*/
 
 /* I/O port
 

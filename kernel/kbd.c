@@ -260,7 +260,8 @@ int __init_kbd_module() {
 	}
 
 	/* prepare the configuration byte again */
-	cbyte = orig_cbyte & ~(KBDC_CONFBYTE_PS2_P1_INTERRUPT|KBDC_CONFBYTE_PS2_P2_INTERRUPT|KBDC_CONFBYTE_PS2_P1_TRANSLATION);
+	// cbyte = orig_cbyte & ~(KBDC_CONFBYTE_PS2_P1_INTERRUPT|KBDC_CONFBYTE_PS2_P2_INTERRUPT|KBDC_CONFBYTE_PS2_P1_TRANSLATION);
+	cbyte = orig_cbyte & ~(KBDC_CONFBYTE_PS2_P1_INTERRUPT|KBDC_CONFBYTE_PS2_P2_INTERRUPT);
 
 	/* step 6:	interface tests */
 	// port1
@@ -335,7 +336,10 @@ int __init_kbd_module() {
 		#endif
 	}
 
-	cbyte &= ~KBDC_CONFBYTE_PS2_P1_TRANSLATION;
+	/* XXX: disabling translation can be a problem for some keyboards/devices. Should I stick
+		to scancode1 then ? To be decided when driver does actual job of mapping it to ascii..
+	*/
+	//cbyte &= ~KBDC_CONFBYTE_PS2_P1_TRANSLATION;
 	if ((kbdc_send_cmd(KBDC_CMD_WRITE_COMMAND_BYTE, cbyte, SENDCMD_TWOBYTE|SENDCMD_NORESPONSE)) == -1) {
 		printk("warning: KBDC_CMD_WRITE_COMMAND_BYTE failed.\n");
 	}
@@ -350,19 +354,19 @@ int __init_kbd_module() {
 	atkbdc.cmd_q[atkbdc.cqi].cmd[0] = KBDE_CMD_RESET;
 	atkbdc.cmd_q[atkbdc.cqi].flags = SENDCMD_RESPONSE_EXPECTED;
 	atkbdc.cmd_q[atkbdc.cqi].dst_port = PS2_ENCODER;
-	atkbdc.cmd_q[atkbdc.cqi].status = S_KCMD_INQUEUE;
+	atkbdc.cmd_q[atkbdc.cqi].status = S_KCMD_READY;
 	atkbdc.cq_idx++;
 */
-	struct kbdc_command* nc = RING32_GET_FREE(&atkbdc.cmd_q);
+	struct kbdc_command* nc = RING32_PEEK_FI(&atkbdc.cmd_q);
 
 	// test of get current scancode command
 	nc->cmd[0] = 0xf0;
 	nc->cmd[1] = 0;
 	nc->flags = KFLAG_WAIT_ACK|KFLAG_TWOBYTE_CMD|KFLAG_WAIT_DATA;
 	nc->dst_port = PS2_ENCODER;
-	nc->status = S_KCMD_INQUEUE;
+	nc->status = S_KCMD_READY;
 	nc->retries = 0;
-	RING32_STORE(&atkbdc.cmd_q, *nc);
+	RING32_STORE("cmdq", &atkbdc.cmd_q, *nc);
 
 	set_interrupt_handler(kbd_isr_handler, 1);
 
@@ -375,7 +379,7 @@ int __init_kbd_module() {
 void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
 	uint8_t scancode = kbde_read();
 
-	printk("isr: 0x%x, cmd in progress: %d\n", scancode, atkbdc.cmd_in_progress);
+	printk("isr sc: 0x%x\n", scancode);
 
 	/* XXX:
 		I need to start simple. Maybe I should have focused on different
@@ -394,32 +398,36 @@ void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
 		that is not command-related will be sent to driver to deal with. 
 	*/
 
-	// Right now we don't know if the scancode is actual scancode or answer to the cmd
 
-	// are we servicing a command ?
-	if (atkbdc.cmd_in_progress) {
-		// reply triggered by command
-		RING32_STORE(&atkbdc.cmd_rep, scancode);
-		kbdc_handle_command();
+	/*
+		Bug in some qemu versions: keyboard sends scancode even when it should
+		process command .. what now ?
+	*/
+
+	// buffer the scancode in controller's buffer
+	RING32_STORE("sbuf", &atkbdc.sbuf, scancode);
+
+	// if command was handled there's nothing for driver
+	if (kbdc_handle_command() == 0) {
 		goto out;
 	}
+	RING32_RI_ADD(&atkbdc.sbuf); // mark as read
 
-	// command is not active, we did receive interrupt, store the code
-	// XXX: 
-	atkbd.lc = atkbd.kbuf.buf[atkbd.kbuf.ci-1];
-	RING32_STORE(&atkbd.kbuf, scancode);
+	// Scancode is not command related, it's a make/break code
+	atkbd.lc = atkbd.kbuf.buf[atkbd.kbuf.fi-1];
+	printk("store @ kbuf\n");
+	RING32_STORE("kbuf", &atkbd.kbuf, scancode);
 	printk("isr: lastchar: 0x%x\n", atkbd.lc);
 
-	// do we have something to service?
-	if (RING32_DATA_READY(&atkbdc.cmd_q)) {
-		kbdc_handle_command();
-		goto out;
-	}
+	// we have everything buffered at this point, we could send EOI and let the driver deal with its thing
+	// XXX: locking required !
+
+	// kbd_handle_event();
 
 	// numlock
-	if (scancode == 0x77 && atkbd.lc != 0xf0) {
+	if (scancode == 0x45 ) {
 		printk("isr: numlock trigger\n");
-		struct kbdc_command* nc = RING32_GET_FREE(&atkbdc.cmd_q);
+		struct kbdc_command* nc = RING32_PEEK_FI(&atkbdc.cmd_q);
 
 		atkbd.ledstate ^= KBDE_LED_NUMLOCK;	// flip the state of numlock
 
@@ -427,132 +435,163 @@ void kbd_isr_handler(__attribute__((unused)) struct trapframe* f) {
 		nc->cmd[1] = atkbd.ledstate;
 		nc->flags = KFLAG_TWOBYTE_CMD|KFLAG_WAIT_ACK;
 		nc->dst_port = PS2_ENCODER;
-		nc->status = S_KCMD_INQUEUE;
-		RING32_STORE(&atkbdc.cmd_q, *nc);
+		nc->status = S_KCMD_READY;
+		RING32_STORE("cmdq", &atkbdc.cmd_q, *nc);
 
 		kbdc_handle_command();
 	}
-
 out:
 	send_8259_EOI(1);
 }
 
 int kbdc_handle_command() {
-	struct kbdc_command* cmd = RIGG32_GET_UNREAD(&atkbdc.cmd_q);
+	struct kbdc_command* kc = RING32_PEEK_RI(&atkbdc.cmd_q);
+	unsigned char sc = RING32_FETCH("sbuf", &atkbdc.sbuf);
 
-	switch(cmd->dst_port) {
-	case PS2_ENCODER:
-		switch(cmd->status) {
-		case S_KCMD_RETRYING:
-		case S_KCMD_INQUEUE:
-				printk("S_KCMD_INQUEUE: %d: 0x%x, sending out\n", cmd->retries, cmd->cmd[cmd->active_cmd_idx]);
-				cmd->response = kbde_poll_write(cmd->cmd[cmd->active_cmd_idx]);
+	// Do we have triggered command in queue ?
+	if (kc->status == S_KCMD_TRIGGERED) {
+		switch(sc) {
+		case KBDE_CMD_RESPONSE_ACK:
+			printk("triggered, got ack, now confirmed\n");
+			kc->status = S_KCMD_CONFIRMED;
+			atkbdc.cmd_in_progress = 1;
+			break;
 
-				if (cmd->response == -1) {
-					if (cmd->retries++ > KBD_RETRY_ATTEMPTS) {
-						#ifdef DEBUG
-							printk("command 0x%x failed\n", cmd->cmd[cmd->active_cmd_idx]);
-						#endif
-						goto fail;
-					}
-					printk("S_KCMD_INQUEUE: command failed: 0x%x, will retry\n", cmd->cmd[cmd->active_cmd_idx]);
-					goto out;
-				}
+		case KBDE_CMD_RESPONSE_RESEND:
+			kc->status = S_KCMD_READY;
+			break;
 
-				// XXX: command was sent to the device but encoder could still send scancodes
-				//	before registering a command
-	
-				if(KCMD_AWAITING_ACK(cmd))
-					cmd->status = S_KCMD_AWAITING_ACK;
-				else
-					cmd->status = S_KCMD_AWAITING_DATA;
+		case KBDE_CMD_RESPONSE_ECHO:
+			#ifdef DEBUG
+			printk("response to echo command, we are done\n");
+			#endif
+			goto success;
+			break;
 
-				atkbdc.cmd_in_progress = 1;
-				break;
+		case 0:
+			#ifdef DEBUG
+			printk("Internal buffer overrun, abort command.\n");
+			#endif
+			goto fail;
 
-		case S_KCMD_AWAITING_ACK:
-				printk("S_KCMD_AWAITING_ACK: ");
-				cmd->response = RING32_FETCH(&atkbdc.cmd_rep);
+		// command was triggered but we got unrecognizable output
+		// leave for kbd driver, wait for another response
+		default:
+			#ifdef DEBUG
+			printk("handle_command: triggered command 0x%x got response 0x%x\n", kc->cmd[0], sc);
+			#endif
+			RING32_RI_SUB(&atkbdc.sbuf);
+			goto out;
+		}
+	}
 
-				// we were awaiting ACK and got something else than resend or ACK
-				if (cmd->response != KBDE_CMD_RESPONSE_ACK) {
-					// XXX: handle the resend at least ? 
+	//if (!atkbdc.cmd_in_progress && kc->status != S_KCMD_READY) {
+	if (!atkbdc.cmd_in_progress && !RING32_DATA_READY(&atkbdc.cmd_q)) {
+		RING32_RI_SUB(&atkbdc.sbuf);	// not using sc
+		goto out;
+	}
+
+	switch(kc->status) {
+	case S_KCMD_READY:
+		printk("S_KCMD_READY\n");
+		RING32_RI_SUB(&atkbdc.sbuf);	// sc was not for us
+		kc->response = kbde_poll_write(kc->cmd[0]);
+		if (kc->response == -1) {
+			if (kc->retries++ > KBD_RETRY_ATTEMPTS) {
+				#ifdef DEBUG
+				printk("command 0x%x failed\n", kc->cmd[0]);
+				#endif
+				goto fail;
+			}
+			printk("S_KCMD_READY: command failed: 0x%x, will retry\n", kc->cmd[0]);
+			goto out;
+		}
+		printk("S_KCMD_READY: triggered\n");
+		kc->status = S_KCMD_TRIGGERED;
+		break;
+
+	case S_KCMD_CONFIRMED:
+		printk("S_KCMD_CONFIRMED\n");
+
+		// handle two-byte command
+		if (KCMD_IS_TWOBYTE(kc)) {
+			printk("twobyte command: 0x%x\n", kc->cmd[1]);
+			kc->response = kbde_poll_write(kc->cmd[1]);
+
+			if (kc->response == -1) {
+				if (kc->retries++ > KBD_RETRY_ATTEMPTS) {
 					#ifdef DEBUG
-					printk("S_KCMD_AWAITING_ACK: command 0x%x failed: 0x%x != 0x%x\n", cmd->cmd[cmd->active_cmd_idx], cmd->response, KBDE_CMD_RESPONSE_ACK);
+					printk("command 0x%x failed\n", kc->cmd[1]);
 					#endif
 					goto fail;
 				}
+				printk("S_KCMD_CONFIRMED:: command failed: 0x%x, will retry\n", kc->cmd[1]);
+				goto out;
+			}
 
-				// depending on cmd->flags we may do the following:
-				//	two byte commmand: send another byte
-				//	expect data after ack
-				//	nothing - finished command
-
-
-				// ACK received but it is two-byte command
-				if (KCMD_IS_TWOBYTE(cmd)) {
-					printk("twobyte command\n");
-					cmd->active_cmd_idx++;
-					cmd->retries = 0;
-
-					cmd->response = kbde_poll_write(cmd->cmd[cmd->active_cmd_idx]);
-
-					// we are still awaiting ACK
-					cmd->flags &= ~(KFLAG_TWOBYTE_CMD);
-					printk("2nd command result(0 expected): %x\n", cmd->response);
-					break;
-				}
-
-				// ACK received, we need data
-				if (KCMD_AWAITING_DATA(cmd)) {
-					printk("S_KCMD_AWAITING_ACK: awaiting data\n");
-					cmd->status = S_KCMD_AWAITING_DATA;
-					break;
-				}
-
-				// ACK received, no more data, not a two byte command. we are done.
-				printk("no response expected for command 0x%x, flags: 0x%x\n", cmd->cmd[cmd->active_cmd_idx], cmd->flags);
-				RING32_RI_ADVANCE(&atkbdc.cmd_q);
-				atkbdc.cmd_in_progress = 0;
-				cmd->status = S_KCMD_DONE;
-				break;
-
-
-		case S_KCMD_AWAITING_DATA:
-				printk("S_KCMD_AWAITING_DATA: ");
-				cmd->response = RING32_FETCH(&atkbdc.cmd_rep);
-				printk("S_KCMD_AWAITING_ANSWER: got response: %x\n", cmd->response);
-
-				// XXX: does encoder have 2-byte command too ?
-
-				cmd->status = S_KCMD_DONE;
-				RING32_RI_ADVANCE(&atkbdc.cmd_q);
-
-				atkbdc.cmd_in_progress = 0;
-				return cmd->response;
-				break;
-
-		default:
-				#ifdef DEBUG
-				printk("%s: invalid command state %d, dropping command\n", __func__, cmd->status);
-				#endif
-				goto fail;
-				break;
+			// we are still awaiting ACK
+			kc->flags &= ~(KFLAG_TWOBYTE_CMD);
+			kc->status = S_KCMD_AWAITING_ACK;
+			printk("2nd command result(0 expected): %x\n", kc->response);
+			break;
 		}
-		break; // PS2_ENCODER
+
+		// not a twobyte commnad, are we expecting response ?
+		if (KCMD_AWAITING_DATA(kc)) {
+			printk("S_KCMD_CONFIRMED: awaiting data\n");
+			kc->status = S_KCMD_AWAITING_DATA;
+			break;
+		}
+
+		// simple command with one ACK, we are done
+		goto success;
+		break;
+
+	case S_KCMD_AWAITING_ACK:
+		printk("S_KCMD_AWAITING_ACK\n");
+
+		if (sc != KBDE_CMD_RESPONSE_ACK) {
+			printk("S_KCMD_AWAITING_ACK: non-ACK response: 0x%x\n", sc);
+			goto fail;
+		}
+
+		if (KCMD_AWAITING_DATA(kc)) {
+			printk("S_KCMD_AWAITING_ACK: awaiting data\n");
+			kc->status = S_KCMD_AWAITING_DATA;
+			break;
+		}
+
+		printk("S_KCMD_AWAITING_ACK: we are done\n");
+
+		// nothing more to process
+		goto success;
+		break;
+
+	case S_KCMD_AWAITING_DATA:
+		printk("S_KCMD_AWAITING_DATA\n");
+		kc->response = sc;
+		goto success;
+		break;
 
 	default:
 		#ifdef DEBUG
-		printk("kbd: unknown command destination: 0x%x\n", cmd->dst_port);
+		printk("handle_command: command 0x%x in unknown state: %d\n", kc->cmd[0], kc->status);
 		#endif
+		goto fail;
 	}
 
 	return 0;
 
-fail:
-	cmd->status = S_KCMD_FAILED;
+success:
+	kc->status = S_KCMD_DONE;
 	atkbdc.cmd_in_progress = 0;
-	RING32_RI_ADVANCE(&atkbdc.cmd_q);
+	RING32_RI_ADD(&atkbdc.cmd_q);
+	return 0;
+
+fail:
+	kc->status = S_KCMD_FAILED;
+	atkbdc.cmd_in_progress = 0;
+	RING32_RI_ADD(&atkbdc.cmd_q);
 
 out:
 	return -1;
@@ -573,13 +612,14 @@ void ps2c_info() {
 void dbg_kbd_dumpbuf() {
 	int i;
 
-	printk("kbuf: ci: %d, ri: %d\n", atkbd.kbuf.ci, atkbd.kbuf.ri);
+	printk("sbuf: fi: %d, ri: %d\n", atkbdc.sbuf.fi, atkbdc.sbuf.ri);
+	for (i =0; i < 32; i++) {
+		printk("%x ", atkbdc.sbuf.buf[i]);
+	}
+
+	printk("\nkbuf: fi: %d, ri: %d\n", atkbd.kbuf.fi, atkbd.kbuf.ri);
 	for (i =0; i < 32; i++) {
 		printk("%x ", atkbd.kbuf.buf[i]);
-	}
-	printk("\ncbuf: ci: %d, ri: %d\n", atkbdc.cmd_rep.ci, atkbdc.cmd_rep.ri);
-	for (i =0; i < 32; i++) {
-		printk("%x ", atkbdc.cmd_rep.buf[i]);
 	}
 	printk("\n");
 }
